@@ -484,33 +484,6 @@ func gunzipData(p []byte) ([]byte, error) {
 	return bb.B, nil
 }
 
-// BodyUnbrotli returns un-brotlied body data.
-//
-// This method may be used if the request header contains
-// 'Content-Encoding: br' for reading un-brotlied body.
-// Use Body for reading brotlied request body.
-func (req *Request) BodyUnbrotli() ([]byte, error) {
-	return unBrotliData(req.Body())
-}
-
-// BodyUnbrotli returns un-brotlied body data.
-//
-// This method may be used if the response header contains
-// 'Content-Encoding: br' for reading un-brotlied body.
-// Use Body for reading brotlied response body.
-func (resp *Response) BodyUnbrotli() ([]byte, error) {
-	return unBrotliData(resp.Body())
-}
-
-func unBrotliData(p []byte) ([]byte, error) {
-	var bb bytebufferpool.ByteBuffer
-	_, err := WriteUnbrotli(&bb, p)
-	if err != nil {
-		return nil, err
-	}
-	return bb.B, nil
-}
-
 // BodyInflate returns inflated body data.
 //
 // This method may be used if the response header contains
@@ -531,23 +504,6 @@ func (resp *Response) BodyInflate() ([]byte, error) {
 
 func (ctx *RequestCtx) RequestBodyStream() io.Reader {
 	return ctx.Request.bodyStream
-}
-
-func (req *Request) BodyUnzstd() ([]byte, error) {
-	return unzstdData(req.Body())
-}
-
-func (resp *Response) BodyUnzstd() ([]byte, error) {
-	return unzstdData(resp.Body())
-}
-
-func unzstdData(p []byte) ([]byte, error) {
-	var bb bytebufferpool.ByteBuffer
-	_, err := WriteUnzstd(&bb, p)
-	if err != nil {
-		return nil, err
-	}
-	return bb.B, nil
 }
 
 func inflateData(p []byte) ([]byte, error) {
@@ -574,10 +530,6 @@ func (req *Request) BodyUncompressed() ([]byte, error) {
 		return req.BodyInflate()
 	case "gzip":
 		return req.BodyGunzip()
-	case "br":
-		return req.BodyUnbrotli()
-	case "zstd":
-		return req.BodyUnzstd()
 	default:
 		return nil, ErrContentEncodingUnsupported
 	}
@@ -596,10 +548,6 @@ func (resp *Response) BodyUncompressed() ([]byte, error) {
 		return resp.BodyInflate()
 	case "gzip":
 		return resp.BodyGunzip()
-	case "br":
-		return resp.BodyUnbrotli()
-	case "zstd":
-		return resp.BodyUnzstd()
 	default:
 		return nil, ErrContentEncodingUnsupported
 	}
@@ -1703,64 +1651,6 @@ func (resp *Response) WriteDeflateLevel(w *bufio.Writer, level int) error {
 	return resp.Write(w)
 }
 
-func (resp *Response) brotliBody(level int) {
-	if len(resp.Header.ContentEncoding()) > 0 {
-		// It looks like the body is already compressed.
-		// Do not compress it again.
-		return
-	}
-
-	if !resp.Header.isCompressibleContentType() {
-		// The content-type cannot be compressed.
-		return
-	}
-
-	if resp.bodyStream != nil {
-		// Reset Content-Length to -1, since it is impossible
-		// to determine body size beforehand of streamed compression.
-		// For https://github.com/valyala/fasthttp/issues/176 .
-		resp.Header.SetContentLength(-1)
-
-		// Do not care about memory allocations here, since brotli is slow
-		// and allocates a lot of memory by itself.
-		bs := resp.bodyStream
-		resp.bodyStream = NewStreamReader(func(sw *bufio.Writer) {
-			zw := acquireStacklessBrotliWriter(sw, level)
-			fw := &flushWriter{
-				wf: zw,
-				bw: sw,
-			}
-			_, wErr := copyZeroAlloc(fw, bs)
-			releaseStacklessBrotliWriter(zw, level)
-			switch v := bs.(type) {
-			case io.Closer:
-				v.Close()
-			case ReadCloserWithError:
-				v.CloseWithError(wErr) //nolint:errcheck
-			}
-		})
-	} else {
-		bodyBytes := resp.bodyBytes()
-		if len(bodyBytes) < minCompressLen {
-			// There is no sense in spending CPU time on small body compression,
-			// since there is a very high probability that the compressed
-			// body size will be bigger than the original body size.
-			return
-		}
-		w := responseBodyPool.Get()
-		w.B = AppendBrotliBytesLevel(w.B, bodyBytes, level)
-
-		// Hack: swap resp.body with w.
-		if resp.body != nil {
-			responseBodyPool.Put(resp.body)
-		}
-		resp.body = w
-		resp.bodyRaw = nil
-	}
-	resp.Header.SetContentEncodingBytes(strBr)
-	resp.Header.addVaryBytes(strAcceptEncoding)
-}
-
 func (resp *Response) gzipBody(level int) {
 	if len(resp.Header.ContentEncoding()) > 0 {
 		// It looks like the body is already compressed.
@@ -1874,57 +1764,6 @@ func (resp *Response) deflateBody(level int) {
 		resp.bodyRaw = nil
 	}
 	resp.Header.SetContentEncodingBytes(strDeflate)
-	resp.Header.addVaryBytes(strAcceptEncoding)
-}
-
-func (resp *Response) zstdBody(level int) {
-	if len(resp.Header.ContentEncoding()) > 0 {
-		return
-	}
-
-	if !resp.Header.isCompressibleContentType() {
-		return
-	}
-
-	if resp.bodyStream != nil {
-		// Reset Content-Length to -1, since it is impossible
-		// to determine body size beforehand of streamed compression.
-		// For
-		resp.Header.SetContentLength(-1)
-
-		// Do not care about memory allocations here, since flate is slow
-		// and allocates a lot of memory by itself.
-		bs := resp.bodyStream
-		resp.bodyStream = NewStreamReader(func(sw *bufio.Writer) {
-			zw := acquireStacklessZstdWriter(sw, level)
-			fw := &flushWriter{
-				wf: zw,
-				bw: sw,
-			}
-			_, wErr := copyZeroAlloc(fw, bs)
-			releaseStacklessZstdWriter(zw, level)
-			switch v := bs.(type) {
-			case io.Closer:
-				v.Close()
-			case ReadCloserWithError:
-				v.CloseWithError(wErr) //nolint:errcheck
-			}
-		})
-	} else {
-		bodyBytes := resp.bodyBytes()
-		if len(bodyBytes) < minCompressLen {
-			return
-		}
-		w := responseBodyPool.Get()
-		w.B = AppendZstdBytesLevel(w.B, bodyBytes, level)
-
-		if resp.body != nil {
-			responseBodyPool.Put(resp.body)
-		}
-		resp.body = w
-		resp.bodyRaw = nil
-	}
-	resp.Header.SetContentEncodingBytes(strZstd)
 	resp.Header.addVaryBytes(strAcceptEncoding)
 }
 

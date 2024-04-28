@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/url"
 	"os"
 	"regexp"
 	"runtime"
@@ -18,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/valyala/fasthttp/fasthttputil"
+	"github.com/adhocore/fasthttp/fasthttputil"
 )
 
 func TestCloseIdleConnections(t *testing.T) {
@@ -496,185 +495,6 @@ func TestClientPostArgs(t *testing.T) {
 	}
 	if len(res.Body()) == 0 {
 		t.Fatal("cannot set args as body")
-	}
-}
-
-func TestClientRedirectSameSchema(t *testing.T) {
-	t.Parallel()
-
-	listenHTTPS1 := testClientRedirectListener(t, true)
-	defer listenHTTPS1.Close()
-
-	listenHTTPS2 := testClientRedirectListener(t, true)
-	defer listenHTTPS2.Close()
-
-	sHTTPS1 := testClientRedirectChangingSchemaServer(t, listenHTTPS1, listenHTTPS1, true)
-	defer sHTTPS1.Stop()
-
-	sHTTPS2 := testClientRedirectChangingSchemaServer(t, listenHTTPS2, listenHTTPS2, false)
-	defer sHTTPS2.Stop()
-
-	destURL := fmt.Sprintf("https://%s/baz", listenHTTPS1.Addr().String())
-
-	urlParsed, err := url.Parse(destURL)
-	if err != nil {
-		t.Fatal(err)
-		return
-	}
-
-	reqClient := &HostClient{
-		IsTLS: true,
-		Addr:  urlParsed.Host,
-		TLSConfig: &tls.Config{
-			InsecureSkipVerify: true,
-		},
-	}
-
-	statusCode, _, err := reqClient.GetTimeout(nil, destURL, 4000*time.Millisecond)
-	if err != nil {
-		t.Fatalf("HostClient error: %v", err)
-		return
-	}
-
-	if statusCode != 200 {
-		t.Fatalf("HostClient error code response %d", statusCode)
-		return
-	}
-}
-
-func TestClientRedirectClientChangingSchemaHttp2Https(t *testing.T) {
-	t.Parallel()
-
-	listenHTTPS := testClientRedirectListener(t, true)
-	defer listenHTTPS.Close()
-
-	listenHTTP := testClientRedirectListener(t, false)
-	defer listenHTTP.Close()
-
-	sHTTPS := testClientRedirectChangingSchemaServer(t, listenHTTPS, listenHTTP, true)
-	defer sHTTPS.Stop()
-
-	sHTTP := testClientRedirectChangingSchemaServer(t, listenHTTPS, listenHTTP, false)
-	defer sHTTP.Stop()
-
-	destURL := fmt.Sprintf("http://%s/baz", listenHTTP.Addr().String())
-
-	reqClient := &Client{
-		TLSConfig: &tls.Config{
-			InsecureSkipVerify: true,
-		},
-	}
-
-	statusCode, _, err := reqClient.GetTimeout(nil, destURL, 4000*time.Millisecond)
-	if err != nil {
-		t.Fatalf("HostClient error: %v", err)
-		return
-	}
-
-	if statusCode != 200 {
-		t.Fatalf("HostClient error code response %d", statusCode)
-		return
-	}
-}
-
-func TestClientRedirectHostClientChangingSchemaHttp2Https(t *testing.T) {
-	t.Parallel()
-
-	listenHTTPS := testClientRedirectListener(t, true)
-	defer listenHTTPS.Close()
-
-	listenHTTP := testClientRedirectListener(t, false)
-	defer listenHTTP.Close()
-
-	sHTTPS := testClientRedirectChangingSchemaServer(t, listenHTTPS, listenHTTP, true)
-	defer sHTTPS.Stop()
-
-	sHTTP := testClientRedirectChangingSchemaServer(t, listenHTTPS, listenHTTP, false)
-	defer sHTTP.Stop()
-
-	destURL := fmt.Sprintf("http://%s/baz", listenHTTP.Addr().String())
-
-	urlParsed, err := url.Parse(destURL)
-	if err != nil {
-		t.Fatal(err)
-		return
-	}
-
-	reqClient := &HostClient{
-		Addr: urlParsed.Host,
-		TLSConfig: &tls.Config{
-			InsecureSkipVerify: true,
-		},
-	}
-
-	_, _, err = reqClient.GetTimeout(nil, destURL, 4000*time.Millisecond)
-	if err != ErrHostClientRedirectToDifferentScheme {
-		t.Fatal("expected HostClient error")
-	}
-}
-
-func testClientRedirectListener(t *testing.T, isTLS bool) net.Listener {
-	var ln net.Listener
-	var err error
-	var tlsConfig *tls.Config
-
-	if isTLS {
-		certData, keyData, kerr := GenerateTestCertificate("localhost")
-		if kerr != nil {
-			t.Fatal(kerr)
-		}
-
-		cert, kerr := tls.X509KeyPair(certData, keyData)
-		if kerr != nil {
-			t.Fatal(kerr)
-		}
-
-		tlsConfig = &tls.Config{
-			Certificates: []tls.Certificate{cert},
-		}
-		ln, err = tls.Listen("tcp", "localhost:0", tlsConfig)
-	} else {
-		ln, err = net.Listen("tcp", "localhost:0")
-	}
-
-	if err != nil {
-		t.Fatalf("cannot listen isTLS %v: %v", isTLS, err)
-	}
-
-	return ln
-}
-
-func testClientRedirectChangingSchemaServer(t *testing.T, https, http net.Listener, isTLS bool) *testEchoServer {
-	s := &Server{
-		Handler: func(ctx *RequestCtx) {
-			if ctx.IsTLS() {
-				ctx.SetStatusCode(200)
-			} else {
-				ctx.Redirect(fmt.Sprintf("https://%s/baz", https.Addr().String()), 301)
-			}
-		},
-	}
-
-	var ln net.Listener
-	if isTLS {
-		ln = https
-	} else {
-		ln = http
-	}
-
-	ch := make(chan struct{})
-	go func() {
-		err := s.Serve(ln)
-		if err != nil {
-			t.Errorf("unexpected error returned from Serve(): %v", err)
-		}
-		close(ch)
-	}()
-	return &testEchoServer{
-		s:  s,
-		ln: ln,
-		ch: ch,
-		t:  t,
 	}
 }
 
@@ -2421,53 +2241,6 @@ func TestSingleEchoConn(t *testing.T) {
 	}
 }
 
-func TestClientHTTPSInvalidServerName(t *testing.T) {
-	t.Parallel()
-
-	sHTTPS := startEchoServerTLS(t, "tcp", "127.0.0.1:")
-	defer sHTTPS.Stop()
-
-	var c Client
-
-	for i := 0; i < 10; i++ {
-		_, _, err := c.GetTimeout(nil, "https://"+sHTTPS.Addr(), time.Second)
-		if err == nil {
-			t.Fatalf("expecting TLS error")
-		}
-	}
-}
-
-func TestClientHTTPSConcurrent(t *testing.T) {
-	t.Parallel()
-
-	sHTTP := startEchoServer(t, "tcp", "127.0.0.1:")
-	defer sHTTP.Stop()
-
-	sHTTPS := startEchoServerTLS(t, "tcp", "127.0.0.1:")
-	defer sHTTPS.Stop()
-
-	c := &Client{
-		TLSConfig: &tls.Config{
-			InsecureSkipVerify: true,
-		},
-	}
-
-	var wg sync.WaitGroup
-	for i := 0; i < 4; i++ {
-		wg.Add(1)
-		addr := "http://" + sHTTP.Addr()
-		if i&1 != 0 {
-			addr = "https://" + sHTTPS.Addr()
-		}
-		go func() {
-			defer wg.Done()
-			testClientGet(t, c, addr, 20)
-			testClientPost(t, c, addr, 10)
-		}()
-	}
-	wg.Wait()
-}
-
 func TestClientManyServers(t *testing.T) {
 	t.Parallel()
 
@@ -2737,10 +2510,6 @@ func (s *testEchoServer) Stop() {
 
 func (s *testEchoServer) Addr() string {
 	return s.ln.Addr().String()
-}
-
-func startEchoServerTLS(t *testing.T, network, addr string) *testEchoServer {
-	return startEchoServerExt(t, network, addr, true)
 }
 
 func startEchoServer(t *testing.T, network, addr string) *testEchoServer {
@@ -3140,24 +2909,6 @@ func (t TransportEmpty) RoundTrip(hc *HostClient, req *Request, res *Response) (
 	return false, nil
 }
 
-func TestHttpsRequestWithoutParsedURL(t *testing.T) {
-	t.Parallel()
-
-	client := HostClient{
-		IsTLS:     true,
-		Transport: TransportEmpty{},
-	}
-
-	req := &Request{}
-
-	req.SetRequestURI("https://foo.com/bar")
-
-	_, err := client.doNonNilReqResp(req, &Response{})
-	if err != nil {
-		t.Fatal("https requests with IsTLS client must succeed")
-	}
-}
-
 func TestHostClientErrConnPoolStrategyNotImpl(t *testing.T) {
 	t.Parallel()
 
@@ -3293,43 +3044,6 @@ func (tw *TransportWrapper) assertRequestLog(reqLog string) {
 func (tw *TransportWrapper) assertResponseLog(respLog string) {
 	if !strings.Contains(respLog, "Trace-Id: 124") {
 		tw.t.Errorf("response log should contains: %v", "Trace-Id: 124")
-	}
-}
-
-func TestClientTransportEx(t *testing.T) {
-	sHTTP := startEchoServer(t, "tcp", "127.0.0.1:")
-	defer sHTTP.Stop()
-
-	sHTTPS := startEchoServerTLS(t, "tcp", "127.0.0.1:")
-	defer sHTTPS.Stop()
-
-	count := 0
-	c := &Client{
-		TLSConfig: &tls.Config{
-			InsecureSkipVerify: true,
-		},
-		ConfigureClient: func(hc *HostClient) error {
-			hc.Transport = &TransportWrapper{base: hc.Transport, count: &count, t: t}
-			return nil
-		},
-	}
-	// test transport
-	const loopCount = 4
-	const getCount = 20
-	const postCount = 10
-	for i := 0; i < loopCount; i++ {
-		addr := "http://" + sHTTP.Addr()
-		if i&1 != 0 {
-			addr = "https://" + sHTTPS.Addr()
-		}
-		// test get
-		testClientGet(t, c, addr, getCount)
-		// test post
-		testClientPost(t, c, addr, postCount)
-	}
-	roundTripCount := loopCount * (getCount + postCount)
-	if count != roundTripCount {
-		t.Errorf("round trip count should be: %v", roundTripCount)
 	}
 }
 

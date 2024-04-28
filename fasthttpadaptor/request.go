@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/valyala/fasthttp"
+	"github.com/adhocore/fasthttp"
 )
 
 // ConvertRequest converts a fasthttp.Request to an http.Request.

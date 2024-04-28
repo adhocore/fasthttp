@@ -88,35 +88,6 @@ func TestFSServeFileCompressed(t *testing.T) {
 	if !bytes.Equal(body, expectedBody) {
 		t.Fatalf("unexpected body %q. expecting %q", body, expectedBody)
 	}
-
-	// request compressed brotli file
-	ctx.Request.Reset()
-	ctx.Request.SetRequestURI("http://foobar.com/baz")
-	ctx.Request.Header.Set(HeaderAcceptEncoding, "br")
-	ServeFS(&ctx, fsTestFilesystem, "fs.go")
-
-	s = ctx.Response.String()
-	br = bufio.NewReader(bytes.NewBufferString(s))
-	if err = resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	ce = resp.Header.ContentEncoding()
-	if string(ce) != "br" {
-		t.Fatalf("Unexpected 'Content-Encoding' %q. Expecting %q", ce, "br")
-	}
-
-	body, err = resp.BodyUnbrotli()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	expectedBody, err = getFileContents("/fs.go")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !bytes.Equal(body, expectedBody) {
-		t.Fatalf("unexpected body %q. expecting %q", body, expectedBody)
-	}
 }
 
 func TestFSFSByteRangeConcurrent(t *testing.T) {
@@ -283,31 +254,6 @@ func testFSFSCompress(t *testing.T, h RequestHandler, filePath string) {
 	if string(zbody) != body {
 		t.Errorf("unexpected body len=%d. Expected len=%d. FilePath=%q", len(zbody), len(body), filePath)
 	}
-
-	// request compressed brotli file
-	ctx.Request.Reset()
-	ctx.Request.SetRequestURI(filePath)
-	ctx.Request.Header.Set(HeaderAcceptEncoding, "br")
-	h(&ctx)
-	s = ctx.Response.String()
-	br = bufio.NewReader(bytes.NewBufferString(s))
-	if err = resp.Read(br); err != nil {
-		t.Errorf("unexpected error: %v. filePath=%q", err, filePath)
-	}
-	if resp.StatusCode() != StatusOK {
-		t.Errorf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusOK, filePath)
-	}
-	ce = resp.Header.ContentEncoding()
-	if string(ce) != "br" {
-		t.Errorf("unexpected content-encoding %q. Expecting %q. filePath=%q", ce, "br", filePath)
-	}
-	zbody, err = resp.BodyUnbrotli()
-	if err != nil {
-		t.Errorf("unexpected error when unbrotling response body: %v. filePath=%q", err, filePath)
-	}
-	if string(zbody) != body {
-		t.Errorf("unexpected body len=%d. Expected len=%d. FilePath=%q", len(zbody), len(body), filePath)
-	}
 }
 
 func TestFSServeFileContentType(t *testing.T) {
@@ -434,35 +380,6 @@ func TestDirFSServeFileCompressed(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	expectedBody, err := getFileContents("/fs.go")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !bytes.Equal(body, expectedBody) {
-		t.Fatalf("unexpected body %q. expecting %q", body, expectedBody)
-	}
-
-	// request compressed brotli file
-	ctx.Request.Reset()
-	ctx.Request.SetRequestURI("http://foobar.com/baz")
-	ctx.Request.Header.Set(HeaderAcceptEncoding, "br")
-	ServeFS(&ctx, fsTestFilesystem, "fs.go")
-
-	s = ctx.Response.String()
-	br = bufio.NewReader(bytes.NewBufferString(s))
-	if err = resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	ce = resp.Header.ContentEncoding()
-	if string(ce) != "br" {
-		t.Fatalf("Unexpected 'Content-Encoding' %q. Expecting %q", ce, "br")
-	}
-
-	body, err = resp.BodyUnbrotli()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	expectedBody, err = getFileContents("/fs.go")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

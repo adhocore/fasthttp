@@ -9,8 +9,8 @@ import (
 	"os/exec"
 	"runtime"
 
-	"github.com/valyala/fasthttp"
-	"github.com/valyala/fasthttp/reuseport"
+	"github.com/adhocore/fasthttp"
+	"github.com/adhocore/fasthttp/reuseport"
 )
 
 const (
@@ -61,9 +61,7 @@ type Prefork struct {
 	// By default standard logger from log package is used.
 	Logger Logger
 
-	ServeFunc         func(ln net.Listener) error
-	ServeTLSFunc      func(ln net.Listener, certFile, keyFile string) error
-	ServeTLSEmbedFunc func(ln net.Listener, certData, keyData []byte) error
+	ServeFunc func(ln net.Listener) error
 
 	ln    net.Listener
 	files []*os.File
@@ -89,12 +87,10 @@ func IsChild() bool {
 // New wraps the fasthttp server to run with preforked processes.
 func New(s *fasthttp.Server) *Prefork {
 	return &Prefork{
-		Network:           defaultNetwork,
-		RecoverThreshold:  runtime.GOMAXPROCS(0) / 2,
-		Logger:            s.Logger,
-		ServeFunc:         s.Serve,
-		ServeTLSFunc:      s.ServeTLS,
-		ServeTLSEmbedFunc: s.ServeTLSEmbed,
+		Network:          defaultNetwork,
+		RecoverThreshold: runtime.GOMAXPROCS(0) / 2,
+		Logger:           s.Logger,
+		ServeFunc:        s.Serve,
 	}
 }
 
@@ -243,42 +239,6 @@ func (p *Prefork) ListenAndServe(addr string) error {
 		p.ln = ln
 
 		return p.ServeFunc(ln)
-	}
-
-	return p.prefork(addr)
-}
-
-// ListenAndServeTLS serves HTTPS requests from the given TCP addr.
-//
-// certFile and keyFile are paths to TLS certificate and key files.
-func (p *Prefork) ListenAndServeTLS(addr, certKey, certFile string) error {
-	if IsChild() {
-		ln, err := p.listen(addr)
-		if err != nil {
-			return err
-		}
-
-		p.ln = ln
-
-		return p.ServeTLSFunc(ln, certFile, certKey)
-	}
-
-	return p.prefork(addr)
-}
-
-// ListenAndServeTLSEmbed serves HTTPS requests from the given TCP addr.
-//
-// certData and keyData must contain valid TLS certificate and key data.
-func (p *Prefork) ListenAndServeTLSEmbed(addr string, certData, keyData []byte) error {
-	if IsChild() {
-		ln, err := p.listen(addr)
-		if err != nil {
-			return err
-		}
-
-		p.ln = ln
-
-		return p.ServeTLSEmbedFunc(ln, certData, keyData)
 	}
 
 	return p.prefork(addr)

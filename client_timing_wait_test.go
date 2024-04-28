@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/valyala/fasthttp/fasthttputil"
+	"github.com/adhocore/fasthttp/fasthttputil"
 )
 
 func newFasthttpSleepEchoHandler(sleep time.Duration) RequestHandler {

@@ -4,8 +4,31 @@
 
 Fast HTTP implementation for Go.
 
+---
+
+### adhocore/fasthttp
+
+This is a forked adaptation from v1.52.0 (+20 commits in `master`) of original **valyala/fasthttp**.
+
+Changes include:
+- removal of TLS support in lieu of SSL termination
+- removal of examples in lieu of single kitchen sink [example](./examples/main.go)
+- removal of support for `brotli` / `zstd` compression in lieu of `gzip`
+- addition of [julienschmidt/httprouter](https://github.com/julienschmidt/httprouter) like router mux, see [httprouter.go](./httprouter.go)
+- addition of [gofiber/fiber](https://github.com/gofiber/fiber) like app/context, see [fiber.go](./fiber.go)
+- addition of [labstack/echo](https://github.com/labstack/echo) like request binder, see [echo.go](./echo.go)
+
+---
+
 # fasthttp might not be for you!
 fasthttp was designed for some high performance edge cases. **Unless** your server/client needs to handle **thousands of small to medium requests per second** and needs a consistent low millisecond response time fasthttp might not be for you. **For most cases `net/http` is much better** as it's easier to use and can handle more cases. For most cases you won't even notice the performance difference.
+
+
+## Install
+
+```
+go get -u github.com/adhocore/fasthttp
+```
 
 
 ## General info and links
@@ -160,13 +183,6 @@ BenchmarkClientGetEndToEnd1Inmemory-4                   	10000000	      1604 ns/
 BenchmarkClientGetEndToEnd10Inmemory-4                  	10000000	      1458 ns/op	       0 B/op	       0 allocs/op
 BenchmarkClientGetEndToEnd100Inmemory-4                 	10000000	      1329 ns/op	       0 B/op	       0 allocs/op
 BenchmarkClientGetEndToEnd1000Inmemory-4                	10000000	      1316 ns/op	       5 B/op	       0 allocs/op
-```
-
-
-## Install
-
-```
-go get -u github.com/valyala/fasthttp
 ```
 
 

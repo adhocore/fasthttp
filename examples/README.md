@@ -1,4 +1,5 @@
 # Code examples
 
-* [HelloWorld server](helloworldserver)
-* [Static file server](fileserver)
+```sh
+go run examples/main.go
+```

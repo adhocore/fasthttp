@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -20,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/valyala/fasthttp/fasthttputil"
+	"github.com/adhocore/fasthttp/fasthttputil"
 )
 
 // Make sure RequestCtx implements context.Context.
@@ -503,38 +502,6 @@ func TestServerErrSmallBuffer(t *testing.T) {
 	expectedErr := errSmallBuffer.Error()
 	if !strings.Contains(serverErr.Error(), expectedErr) {
 		t.Fatalf("unexpected log output: %v. Expecting %q", serverErr, expectedErr)
-	}
-}
-
-func TestRequestCtxIsTLS(t *testing.T) {
-	t.Parallel()
-
-	var ctx RequestCtx
-
-	// tls.Conn
-	ctx.c = &tls.Conn{}
-	if !ctx.IsTLS() {
-		t.Fatal("IsTLS must return true")
-	}
-
-	// non-tls.Conn
-	ctx.c = &readWriter{}
-	if ctx.IsTLS() {
-		t.Fatal("IsTLS must return false")
-	}
-
-	// overridden tls.Conn
-	ctx.c = &struct {
-		*tls.Conn
-		fooBar bool
-	}{}
-	if !ctx.IsTLS() {
-		t.Fatal("IsTLS must return true")
-	}
-
-	ctx.c = &perIPConn{Conn: &tls.Conn{}}
-	if !ctx.IsTLS() {
-		t.Fatal("IsTLS must return true")
 	}
 }
 
@@ -1107,183 +1074,6 @@ func TestServerWriteFastError(t *testing.T) {
 	}
 }
 
-func TestServerTLS(t *testing.T) {
-	t.Parallel()
-
-	text := []byte("Make fasthttp great again")
-	ln := fasthttputil.NewInmemoryListener()
-
-	s := &Server{
-		Handler: func(ctx *RequestCtx) {
-			ctx.Write(text) //nolint:errcheck
-		},
-	}
-
-	certData, keyData, err := GenerateTestCertificate("localhost")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = s.AppendCertEmbed(certData, keyData)
-	if err != nil {
-		t.Fatal(err)
-	}
-	go func() {
-		err = s.ServeTLS(ln, "", "")
-		if err != nil {
-			t.Error(err)
-		}
-	}()
-
-	c := &Client{
-		ReadTimeout: time.Second * 2,
-		Dial: func(addr string) (net.Conn, error) {
-			return ln.Dial()
-		},
-		TLSConfig: &tls.Config{
-			InsecureSkipVerify: true,
-		},
-	}
-
-	req, res := AcquireRequest(), AcquireResponse()
-	req.SetRequestURI("https://some.url")
-
-	err = c.Do(req, res)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(text, res.Body()) {
-		t.Fatal("error transmitting information")
-	}
-}
-
-func TestServerTLSReadTimeout(t *testing.T) {
-	t.Parallel()
-
-	ln := fasthttputil.NewInmemoryListener()
-
-	s := &Server{
-		ReadTimeout: time.Millisecond * 500,
-		Logger:      &testLogger{}, // Ignore log output.
-		Handler: func(ctx *RequestCtx) {
-		},
-	}
-
-	certData, keyData, err := GenerateTestCertificate("localhost")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = s.AppendCertEmbed(certData, keyData)
-	if err != nil {
-		t.Fatal(err)
-	}
-	go func() {
-		err = s.ServeTLS(ln, "", "")
-		if err != nil {
-			t.Error(err)
-		}
-	}()
-
-	c, err := ln.Dial()
-	if err != nil {
-		t.Error(err)
-	}
-
-	r := make(chan error)
-
-	go func() {
-		b := make([]byte, 1)
-		_, err := c.Read(b)
-		c.Close()
-		r <- err
-	}()
-
-	select {
-	case err = <-r:
-	case <-time.After(time.Second * 2):
-	}
-
-	if err == nil {
-		t.Error("server didn't close connection after timeout")
-	}
-}
-
-func TestServerServeTLSEmbed(t *testing.T) {
-	t.Parallel()
-
-	ln := fasthttputil.NewInmemoryListener()
-
-	certData, keyData, err := GenerateTestCertificate("localhost")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// start the server
-	ch := make(chan struct{})
-	go func() {
-		err := ServeTLSEmbed(ln, certData, keyData, func(ctx *RequestCtx) {
-			if !ctx.IsTLS() {
-				ctx.Error("expecting tls", StatusBadRequest)
-				return
-			}
-			if !ctx.URI().isHTTPS() {
-				ctx.Error(fmt.Sprintf("unexpected scheme=%q. Expecting %q", ctx.URI().Scheme(), "https"), StatusBadRequest)
-				return
-			}
-			ctx.WriteString("success") //nolint:errcheck
-		})
-		if err != nil {
-			t.Errorf("unexpected error: %v", err)
-		}
-		close(ch)
-	}()
-
-	// establish connection to the server
-	conn, err := ln.Dial()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	tlsConn := tls.Client(conn, &tls.Config{
-		InsecureSkipVerify: true,
-	})
-
-	// send request
-	if _, err = tlsConn.Write([]byte("GET / HTTP/1.1\r\nHost: aaa\r\n\r\n")); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// read response
-	respCh := make(chan struct{})
-	go func() {
-		br := bufio.NewReader(tlsConn)
-		var resp Response
-		if err := resp.Read(br); err != nil {
-			t.Error("unexpected error")
-		}
-		body := resp.Body()
-		if string(body) != "success" {
-			t.Errorf("unexpected response body %q. Expecting %q", body, "success")
-		}
-		close(respCh)
-	}()
-	select {
-	case <-respCh:
-	case <-time.After(time.Second):
-		t.Fatal("timeout")
-	}
-
-	// close the server
-	if err = ln.Close(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	select {
-	case <-ch:
-	case <-time.After(time.Second):
-		t.Fatal("timeout")
-	}
-}
-
 func TestServerMultipartFormDataRequest(t *testing.T) {
 	t.Parallel()
 
@@ -1769,21 +1559,6 @@ func TestRequestCtxFormValue(t *testing.T) {
 	}
 }
 
-func TestSetStandardFormValueFunc(t *testing.T) {
-	t.Parallel()
-	var ctx RequestCtx
-	var req Request
-	req.SetRequestURI("/foo/bar?aaa=bbb")
-	req.SetBodyString("aaa=port")
-	req.Header.SetContentType("application/x-www-form-urlencoded")
-	ctx.Init(&req, nil, nil)
-	ctx.formValueFunc = NetHttpFormValueFunc
-	v := ctx.FormValue("aaa")
-	if string(v) != "port" {
-		t.Fatalf("unexpected value %q. Expecting %q", v, "port")
-	}
-}
-
 func TestRequestCtxUserValue(t *testing.T) {
 	t.Parallel()
 
@@ -1990,244 +1765,6 @@ func TestServerContinueHandler(t *testing.T) {
 		rw.r.Reset()
 		rw.r.WriteString("POST /foo HTTP/1.1\r\nHost: gle.com\r\nExpect: 100-continue\r\nContent-Length: 6\r\nContent-Type: a/b\r\n\r\n123456")
 		sendRequest(rw, StatusExpectationFailed, "")
-	}
-}
-
-func TestCompressHandler(t *testing.T) {
-	t.Parallel()
-
-	expectedBody := string(createFixedBody(2e4))
-	h := CompressHandler(func(ctx *RequestCtx) {
-		ctx.WriteString(expectedBody) //nolint:errcheck
-	})
-
-	var ctx RequestCtx
-	var resp Response
-
-	// verify uncompressed response
-	h(&ctx)
-	s := ctx.Response.String()
-	br := bufio.NewReader(bytes.NewBufferString(s))
-	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	ce := resp.Header.ContentEncoding()
-	if len(ce) != 0 {
-		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "")
-	}
-	body := resp.Body()
-	if string(body) != expectedBody {
-		t.Fatalf("unexpected body %q. Expecting %q", body, expectedBody)
-	}
-
-	// verify gzip-compressed response
-	ctx.Request.Reset()
-	ctx.Response.Reset()
-	ctx.Request.Header.Set("Accept-Encoding", "gzip, deflate, sdhc")
-
-	h(&ctx)
-	s = ctx.Response.String()
-	br = bufio.NewReader(bytes.NewBufferString(s))
-	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	ce = resp.Header.ContentEncoding()
-	if string(ce) != "gzip" {
-		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "gzip")
-	}
-	body, err := resp.BodyGunzip()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if string(body) != expectedBody {
-		t.Fatalf("unexpected body %q. Expecting %q", body, expectedBody)
-	}
-
-	// an attempt to compress already compressed response
-	ctx.Request.Reset()
-	ctx.Response.Reset()
-	ctx.Request.Header.Set("Accept-Encoding", "gzip, deflate, sdhc")
-	hh := CompressHandler(h)
-	hh(&ctx)
-	s = ctx.Response.String()
-	br = bufio.NewReader(bytes.NewBufferString(s))
-	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	ce = resp.Header.ContentEncoding()
-	if string(ce) != "gzip" {
-		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "gzip")
-	}
-	body, err = resp.BodyGunzip()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if string(body) != expectedBody {
-		t.Fatalf("unexpected body %q. Expecting %q", body, expectedBody)
-	}
-
-	// verify deflate-compressed response
-	ctx.Request.Reset()
-	ctx.Response.Reset()
-	ctx.Request.Header.Set(HeaderAcceptEncoding, "foobar, deflate, sdhc")
-
-	h(&ctx)
-	s = ctx.Response.String()
-	br = bufio.NewReader(bytes.NewBufferString(s))
-	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	ce = resp.Header.ContentEncoding()
-	if string(ce) != "deflate" {
-		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "deflate")
-	}
-	body, err = resp.BodyInflate()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if string(body) != expectedBody {
-		t.Fatalf("unexpected body %q. Expecting %q", body, expectedBody)
-	}
-}
-
-func TestCompressHandlerVary(t *testing.T) {
-	t.Parallel()
-
-	expectedBody := string(createFixedBody(2e4))
-
-	h := CompressHandlerBrotliLevel(func(ctx *RequestCtx) {
-		ctx.WriteString(expectedBody) //nolint:errcheck
-	}, CompressBrotliBestSpeed, CompressBestSpeed)
-
-	var ctx RequestCtx
-	var resp Response
-
-	// verify uncompressed response
-	h(&ctx)
-	s := ctx.Response.String()
-	br := bufio.NewReader(bytes.NewBufferString(s))
-	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	ce := resp.Header.ContentEncoding()
-	if len(ce) != 0 {
-		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "")
-	}
-	vary := resp.Header.Peek("Vary")
-	if len(vary) != 0 {
-		t.Fatalf("unexpected Vary: %q. Expecting %q", vary, "")
-	}
-	body := resp.Body()
-	if string(body) != expectedBody {
-		t.Fatalf("unexpected body %q. Expecting %q", body, expectedBody)
-	}
-
-	// verify gzip-compressed response
-	ctx.Request.Reset()
-	ctx.Response.Reset()
-	ctx.Request.Header.Set("Accept-Encoding", "gzip, deflate, sdhc")
-
-	h(&ctx)
-	s = ctx.Response.String()
-	br = bufio.NewReader(bytes.NewBufferString(s))
-	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	ce = resp.Header.ContentEncoding()
-	if string(ce) != "gzip" {
-		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "gzip")
-	}
-	vary = resp.Header.Peek("Vary")
-	if string(vary) != "Accept-Encoding" {
-		t.Fatalf("unexpected Vary: %q. Expecting %q", vary, "Accept-Encoding")
-	}
-	body, err := resp.BodyGunzip()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if string(body) != expectedBody {
-		t.Fatalf("unexpected body %q. Expecting %q", body, expectedBody)
-	}
-
-	// an attempt to compress already compressed response
-	ctx.Request.Reset()
-	ctx.Response.Reset()
-	ctx.Request.Header.Set("Accept-Encoding", "gzip, deflate, sdhc")
-	hh := CompressHandler(h)
-	hh(&ctx)
-	s = ctx.Response.String()
-	br = bufio.NewReader(bytes.NewBufferString(s))
-	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	ce = resp.Header.ContentEncoding()
-	if string(ce) != "gzip" {
-		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "gzip")
-	}
-	vary = resp.Header.Peek("Vary")
-	if string(vary) != "Accept-Encoding" {
-		t.Fatalf("unexpected Vary: %q. Expecting %q", vary, "Accept-Encoding")
-	}
-	body, err = resp.BodyGunzip()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if string(body) != expectedBody {
-		t.Fatalf("unexpected body %q. Expecting %q", body, expectedBody)
-	}
-
-	// verify deflate-compressed response
-	ctx.Request.Reset()
-	ctx.Response.Reset()
-	ctx.Request.Header.Set(HeaderAcceptEncoding, "foobar, deflate, sdhc")
-
-	h(&ctx)
-	s = ctx.Response.String()
-	br = bufio.NewReader(bytes.NewBufferString(s))
-	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	ce = resp.Header.ContentEncoding()
-	if string(ce) != "deflate" {
-		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "deflate")
-	}
-	vary = resp.Header.Peek("Vary")
-	if string(vary) != "Accept-Encoding" {
-		t.Fatalf("unexpected Vary: %q. Expecting %q", vary, "Accept-Encoding")
-	}
-	body, err = resp.BodyInflate()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if string(body) != expectedBody {
-		t.Fatalf("unexpected body %q. Expecting %q", body, expectedBody)
-	}
-
-	// verify br-compressed response
-	ctx.Request.Reset()
-	ctx.Response.Reset()
-	ctx.Request.Header.Set(HeaderAcceptEncoding, "gzip, deflate, br")
-
-	h(&ctx)
-	s = ctx.Response.String()
-	br = bufio.NewReader(bytes.NewBufferString(s))
-	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	ce = resp.Header.ContentEncoding()
-	if string(ce) != "br" {
-		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "br")
-	}
-	vary = resp.Header.Peek("Vary")
-	if string(vary) != "Accept-Encoding" {
-		t.Fatalf("unexpected Vary: %q. Expecting %q", vary, "Accept-Encoding")
-	}
-	body, err = resp.BodyUnbrotli()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if string(body) != expectedBody {
-		t.Fatalf("unexpected body %q. Expecting %q", body, expectedBody)
 	}
 }
 
@@ -3500,28 +3037,6 @@ func TestServeConnSingleRequest(t *testing.T) {
 	verifyResponse(t, br, 200, "aaa", "requestURI=/foo/bar?baz, host=google.com")
 }
 
-func TestServerSetFormValueFunc(t *testing.T) {
-	t.Parallel()
-	s := &Server{
-		Handler: func(ctx *RequestCtx) {
-			ctx.Success("aaa", ctx.FormValue("aaa"))
-		},
-		FormValueFunc: func(ctx *RequestCtx, s string) []byte {
-			return []byte(s)
-		},
-	}
-
-	rw := &readWriter{}
-	rw.r.WriteString("GET /foo/bar?baz HTTP/1.1\r\nHost: google.com\r\n\r\n")
-
-	if err := s.ServeConn(rw); err != nil {
-		t.Fatalf("Unexpected error from serveConn: %v", err)
-	}
-
-	br := bufio.NewReader(&rw.w)
-	verifyResponse(t, br, 200, "aaa", "aaa")
-}
-
 func TestServeConnMultiRequests(t *testing.T) {
 	t.Parallel()
 
@@ -4146,7 +3661,7 @@ func TestMaxReadTimeoutPerRequest(t *testing.T) {
 
 	select {
 	case err := <-ch:
-		if err == nil || !strings.EqualFold(err.Error(), "timeout") {
+		if err == nil || err != nil && !strings.EqualFold(err.Error(), "timeout") {
 			t.Fatalf("Unexpected error from serveConn: %v", err)
 		}
 	case <-time.After(time.Second):
@@ -4206,7 +3721,7 @@ func TestMaxWriteTimeoutPerRequest(t *testing.T) {
 
 	select {
 	case err := <-ch:
-		if err == nil || !strings.EqualFold(err.Error(), "timeout") {
+		if err == nil || err != nil && !strings.EqualFold(err.Error(), "timeout") {
 			t.Fatalf("Unexpected error from serveConn: %v", err)
 		}
 	case <-time.After(time.Second):

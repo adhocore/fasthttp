@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/valyala/fasthttp"
+	"github.com/adhocore/fasthttp"
 )
 
 func setUp() {
@@ -53,14 +53,6 @@ func Test_New(t *testing.T) {
 
 	if reflect.ValueOf(p.ServeFunc).Pointer() != reflect.ValueOf(s.Serve).Pointer() {
 		t.Errorf("Prefork.ServeFunc == %p, want %p", p.ServeFunc, s.Serve)
-	}
-
-	if reflect.ValueOf(p.ServeTLSFunc).Pointer() != reflect.ValueOf(s.ServeTLS).Pointer() {
-		t.Errorf("Prefork.ServeTLSFunc == %p, want %p", p.ServeTLSFunc, s.ServeTLS)
-	}
-
-	if reflect.ValueOf(p.ServeTLSEmbedFunc).Pointer() != reflect.ValueOf(s.ServeTLSEmbed).Pointer() {
-		t.Errorf("Prefork.ServeTLSFunc == %p, want %p", p.ServeTLSEmbedFunc, s.ServeTLSEmbed)
 	}
 }
 
@@ -145,70 +137,6 @@ func Test_ListenAndServe(t *testing.T) {
 	addr := getAddr()
 
 	err := p.ListenAndServe(addr)
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-
-	p.ln.Close()
-
-	lnAddr := p.ln.Addr().String()
-	if lnAddr != addr {
-		t.Errorf("Prefork.Addr == %q, want %q", lnAddr, addr)
-	}
-
-	if p.ln == nil {
-		t.Error("Prefork.ln is nil")
-	}
-}
-
-func Test_ListenAndServeTLS(t *testing.T) {
-	// This test can't run parallel as it modifies os.Args.
-
-	setUp()
-	defer tearDown()
-
-	s := &fasthttp.Server{}
-	p := New(s)
-	p.Reuseport = true
-	p.ServeTLSFunc = func(ln net.Listener, certFile, keyFile string) error {
-		return nil
-	}
-
-	addr := getAddr()
-
-	err := p.ListenAndServeTLS(addr, "./key", "./cert")
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-
-	p.ln.Close()
-
-	lnAddr := p.ln.Addr().String()
-	if lnAddr != addr {
-		t.Errorf("Prefork.Addr == %q, want %q", lnAddr, addr)
-	}
-
-	if p.ln == nil {
-		t.Error("Prefork.ln is nil")
-	}
-}
-
-func Test_ListenAndServeTLSEmbed(t *testing.T) {
-	// This test can't run parallel as it modifies os.Args.
-
-	setUp()
-	defer tearDown()
-
-	s := &fasthttp.Server{}
-	p := New(s)
-	p.Reuseport = true
-	p.ServeTLSEmbedFunc = func(ln net.Listener, certData, keyData []byte) error {
-		return nil
-	}
-
-	addr := getAddr()
-
-	err := p.ListenAndServeTLSEmbed(addr, []byte("key"), []byte("cert"))
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}

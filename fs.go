@@ -16,9 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/gzip"
-	"github.com/klauspost/compress/zstd"
 	"github.com/valyala/bytebufferpool"
 )
 
@@ -1047,10 +1045,6 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			mustCompress = true
 			fileCacheKind = gzipCacheKind
 			fileEncoding = "gzip"
-		case ctx.Request.Header.HasAcceptEncodingBytes(strZstd):
-			mustCompress = true
-			fileCacheKind = zstdCacheKind
-			fileEncoding = "zstd"
 		}
 	}
 
@@ -1109,12 +1103,8 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	hdr := &ctx.Response.Header
 	if ff.compressed {
 		switch fileEncoding {
-		case "br":
-			hdr.SetContentEncodingBytes(strBr)
 		case "gzip":
 			hdr.SetContentEncodingBytes(strGzip)
-		case "zstd":
-			hdr.SetContentEncodingBytes(strZstd)
 		}
 	}
 
@@ -1319,12 +1309,8 @@ nestedContinue:
 	if mustCompress {
 		var zbuf bytebufferpool.ByteBuffer
 		switch fileEncoding {
-		case "br":
-			zbuf.B = AppendBrotliBytesLevel(zbuf.B, w.B, CompressDefaultCompression)
 		case "gzip":
 			zbuf.B = AppendGzipBytesLevel(zbuf.B, w.B, CompressDefaultCompression)
-		case "zstd":
-			zbuf.B = AppendZstdBytesLevel(zbuf.B, w.B, CompressZstdDefault)
 		}
 		w = &zbuf
 	}
@@ -1424,13 +1410,6 @@ func (h *fsHandler) compressFileNolock(
 		return nil, errNoCreatePermission
 	}
 	switch fileEncoding {
-	case "br":
-		zw := acquireStacklessBrotliWriter(zf, CompressDefaultCompression)
-		_, err = copyZeroAlloc(zw, f)
-		if errf := zw.Flush(); err == nil {
-			err = errf
-		}
-		releaseStacklessBrotliWriter(zw, CompressDefaultCompression)
 	case "gzip":
 		zw := acquireStacklessGzipWriter(zf, CompressDefaultCompression)
 		_, err = copyZeroAlloc(zw, f)
@@ -1438,13 +1417,6 @@ func (h *fsHandler) compressFileNolock(
 			err = errf
 		}
 		releaseStacklessGzipWriter(zw, CompressDefaultCompression)
-	case "zstd":
-		zw := acquireStacklessZstdWriter(zf, CompressZstdDefault)
-		_, err = copyZeroAlloc(zw, f)
-		if errf := zw.Flush(); err == nil {
-			err = errf
-		}
-		releaseStacklessZstdWriter(zw, CompressZstdDefault)
 	}
 	_ = zf.Close()
 	_ = f.Close()
@@ -1469,13 +1441,6 @@ func (h *fsHandler) newCompressedFSFileCache(f fs.File, fileInfo fs.FileInfo, fi
 	)
 
 	switch fileEncoding {
-	case "br":
-		zw := acquireStacklessBrotliWriter(w, CompressDefaultCompression)
-		_, err = copyZeroAlloc(zw, f)
-		if errf := zw.Flush(); err == nil {
-			err = errf
-		}
-		releaseStacklessBrotliWriter(zw, CompressDefaultCompression)
 	case "gzip":
 		zw := acquireStacklessGzipWriter(w, CompressDefaultCompression)
 		_, err = copyZeroAlloc(zw, f)
@@ -1483,13 +1448,6 @@ func (h *fsHandler) newCompressedFSFileCache(f fs.File, fileInfo fs.FileInfo, fi
 			err = errf
 		}
 		releaseStacklessGzipWriter(zw, CompressDefaultCompression)
-	case "zstd":
-		zw := acquireStacklessZstdWriter(w, CompressZstdDefault)
-		_, err = copyZeroAlloc(zw, f)
-		if errf := zw.Flush(); err == nil {
-			err = errf
-		}
-		releaseStacklessZstdWriter(zw, CompressZstdDefault)
 	}
 	defer func() { _ = f.Close() }()
 
@@ -1633,28 +1591,16 @@ func (h *fsHandler) newFSFile(f fs.File, fileInfo fs.FileInfo, compressed bool, 
 func readFileHeader(f io.Reader, compressed bool, fileEncoding string) ([]byte, error) {
 	r := f
 	var (
-		br  *brotli.Reader
-		zr  *gzip.Reader
-		zsr *zstd.Decoder
+		zr *gzip.Reader
 	)
 	if compressed {
 		var err error
 		switch fileEncoding {
-		case "br":
-			if br, err = acquireBrotliReader(f); err != nil {
-				return nil, err
-			}
-			r = br
 		case "gzip":
 			if zr, err = acquireGzipReader(f); err != nil {
 				return nil, err
 			}
 			r = zr
-		case "zstd":
-			if zsr, err = acquireZstdReader(f); err != nil {
-				return nil, err
-			}
-			r = zsr
 		}
 	}
 
@@ -1671,16 +1617,8 @@ func readFileHeader(f io.Reader, compressed bool, fileEncoding string) ([]byte, 
 		return nil, err
 	}
 
-	if br != nil {
-		releaseBrotliReader(br)
-	}
-
 	if zr != nil {
 		releaseGzipReader(zr)
-	}
-
-	if zsr != nil {
-		releaseZstdReader(zsr)
 	}
 
 	return data, err

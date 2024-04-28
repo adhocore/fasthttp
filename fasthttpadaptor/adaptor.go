@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/valyala/fasthttp"
+	"github.com/adhocore/fasthttp"
 )
 
 // NewFastHTTPHandlerFunc wraps net/http handler func to fasthttp
