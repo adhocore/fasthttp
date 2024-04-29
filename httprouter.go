@@ -329,6 +329,8 @@ func (r *Router) Delete(path string, handle Handle) *Router {
 // communication with a proxy).
 func (r *Router) Handle(method, path string, handle Handle) *Router {
 	varsCount := uint16(0)
+	pathName := strings.SplitN(path, "#", 2)
+	path = pathName[0]
 
 	if method == "" {
 		panic("method must not be empty")
@@ -340,7 +342,9 @@ func (r *Router) Handle(method, path string, handle Handle) *Router {
 		panic("handle must not be nil")
 	}
 
-	r.last = path
+	if r.last = path; len(pathName) == 2 {
+		r.Name(pathName[1])
+	}
 
 	varsCount++
 	handle = r.saveMatchedRoutePath(path, handle)
@@ -371,6 +375,13 @@ func (r *Router) Handle(method, path string, handle Handle) *Router {
 	}
 
 	return r
+}
+
+func (r *Router) Name(name string) {
+	if path, ok := r.names[name]; ok && path != r.last {
+		panic(fmt.Errorf("route name %s already assigned for path %s", name, path))
+	}
+	r.names[name] = r.last
 }
 
 const routeParamKey = "_route_param_"

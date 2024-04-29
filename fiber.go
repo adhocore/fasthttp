@@ -130,15 +130,18 @@ type StrMap = map[string]string
 
 type App struct {
 	Server *Server
+	View   *Render
 	*Router
-	uses map[string][]Handle
+	uses    map[string][]Handle
+	usesPos []string
 }
 
 func New() *App {
 	return &App{
-		Server: &Server{},
-		Router: NewRouter(),
-		uses:   make(map[string][]Handle),
+		Server:  &Server{},
+		Router:  NewRouter(),
+		uses:    make(map[string][]Handle, 0),
+		usesPos: make([]string, 0),
 	}
 }
 
@@ -158,9 +161,14 @@ func (app *App) ServeUnix(addr string) error {
 	return app.Server.ListenAndServeUNIX(addr, sockMode)
 }
 
-func (app *App) Use(path string, handle Handle) {
+func (app *App) Use(handle Handle) {
+	app.use("", handle)
+}
+
+func (app *App) use(path string, handle Handle) {
 	if _, ok := app.uses[path]; !ok {
 		app.uses[path] = []Handle{handle}
+		app.usesPos = append(app.usesPos, path)
 		return
 	}
 	app.uses[path] = append(app.uses[path], handle)
@@ -170,28 +178,27 @@ func (app *App) GetPost(path string, handle Handle) *Router {
 	return app.Get(path, handle).Post(path, handle)
 }
 
-func (r *Router) Name(name string) {
-	if path, ok := r.names[name]; ok {
-		panic(fmt.Errorf("route name %s already assigned for path %s", name, path))
-	}
-	r.names[name] = r.last
-}
-
 const routeNamesKey = "_route_names_"
+const viewRendererKey = "_view_renderer_"
+const ReqStartKey = "_req_start_time_"
 
 func (app *App) Handler(c *Ctx) {
+	c.SetUserValue(ReqStartKey, time.Now())
+	if app.View != nil {
+		c.SetUserValue(viewRendererKey, app.View)
+	}
 	c.SetUserValue(routeNamesKey, app.Router.names)
 	if err := app.Router.Serve(c, app.pipeThru); err != nil {
 		c.SendStatus(StatusInternalServerError)
 	}
 }
 
-func (app *App) pipeThru(path string, handle Handle, c *Ctx) error {
-	for p := range app.uses {
+func (app *App) pipeThru(path string, handle Handle, c *Ctx) (err error) {
+	for _, p := range app.usesPos {
 		if p == path || strings.HasPrefix(path+"/", p+"/") {
 			for _, use := range app.uses[p] {
-				if err := use(c); err != nil || c.Served() {
-					return err
+				if err = use(c); err != nil || c.Served() {
+					return
 				}
 			}
 		}
@@ -255,7 +262,7 @@ func (r *Group) Handle(method, path string, handle Handle) *Router {
 }
 
 func (r *Group) Use(handle Handle) {
-	r.app.Use(r.Prefix, handle)
+	r.app.use(r.Prefix, handle)
 }
 
 // Error represents an error that occurred while handling a request.
@@ -267,6 +274,11 @@ type Error struct {
 // Error makes it compatible with the `error` interface.
 func (e *Error) Error() string {
 	return e.Message
+}
+
+func (e *Error) WithMessage(s string) *Error {
+	e.Message = s
+	return e
 }
 
 // NewError creates a new Error instance with an optional message
@@ -863,6 +875,11 @@ func (c *Ctx) Methods() string {
 	return b2s(c.Method())
 }
 
+// Next does nothing, returns nil
+func (c *Ctx) Next() error {
+	return nil
+}
+
 func (c *Ctx) Paths() string {
 	return b2s(c.URI().Path())
 }
@@ -894,7 +911,7 @@ func (c *Ctx) FormValues(key string) string {
 // Returned value is only valid within the handler. Do not store any references.
 // Make copies or use the Immutable setting to use the value outside the Handler.
 func (c *Ctx) Params(key string, defaultValue ...string) (v string) {
-	if ps, ok := c.UserValue(routeParamKey).(*Params); ok {
+	if ps, ok := c.UserValue(routeParamKey).(*Params); ok && ps != nil {
 		v = ps.ByName(key)
 	}
 	return defaultString(v, defaultValue)
@@ -904,7 +921,7 @@ func (c *Ctx) Params(key string, defaultValue ...string) (v string) {
 // Using Params method to get params.
 func (c *Ctx) AllParams() map[string]string {
 	m := map[string]string{}
-	if ps, ok := c.UserValue(routeParamKey).(Params); ok {
+	if ps, ok := c.UserValue(routeParamKey).(Params); ok && ps != nil {
 		for _, p := range ps {
 			m[p.Key] = p.Value
 		}
@@ -1192,7 +1209,7 @@ func (c *Ctx) GetRouteURL(routeName string, params Map) (string, error) {
 func (c *Ctx) RedirectToRoute(routeName string, params Map, status ...int) error {
 	uri, err := c.GetRouteURL(routeName, params)
 	if err == nil {
-		c.Redirect(uri, append(status, StatusFound)[0])
+		c.Redirects(uri, append(status, StatusFound)[0])
 	}
 	return err
 }
@@ -1204,49 +1221,53 @@ func (c *Ctx) RedirectBack(fallback string, status ...int) error {
 	if location == "" {
 		location = fallback
 	}
-	c.Redirect(location, append(status, StatusFound)[0])
+	c.Redirects(location, append(status, StatusFound)[0])
 	return nil
 }
+
+func (c *Ctx) Redirects(location string, status ...int) error {
+	c.redirect(s2b(location), append(status, StatusFound)[0])
+	return nil
+}
+
+var ErrNoViewRenderer = errors.New("view renderer not configured")
 
 // Render a template with data and sends a text/html response.
 // We support the following engines: html, amber, handlebars, mustache, pug
 func (c *Ctx) Render(name string, bind Map, layouts ...string) error {
+	view, ok := c.UserValue(viewRendererKey).(*Render)
+	if !ok || view == nil {
+		return ErrNoViewRenderer
+	}
 	// Get new buffer from pool
 	buf := bytebufferpool.Get()
 	defer bytebufferpool.Put(buf)
 
-	// Initialize empty bind map if bind is nil
-	if bind == nil {
-		bind = make(Map)
+	// Pass global binds
+	bind = c.mergeBind(bind)
+	if err := view.Render(buf, name, bind, layouts...); err != nil {
+		return fmt.Errorf("render view: %w", err)
 	}
 
-	// Pass-locals-to-views, bind, appListKeys
-	// bind = c.mergeBind(bind)
-
-	// todo:
-
-	// Set Content-Type to text/html
 	c.Response.Header.SetContentType(MIMETextHTMLCharsetUTF8)
-	// Set rendered template to body
 	c.Response.SetBody(buf.Bytes())
-
 	return nil
 }
 
-// // Route returns the matched Route struct.
-// func (c *Ctx) Route() *Route {
-// 	if c.route == nil {
-// 		// Fallback for fasthttp error handler
-// 		return &Route{
-// 			path:     c.pathOriginal,
-// 			Path:     c.pathOriginal,
-// 			Method:   c.method,
-// 			Handlers: make([]Handler, 0),
-// 			Params:   make([]string, 0),
-// 		}
-// 	}
-// 	return c.route
-// }
+// Route returns the matched Route name.
+func (c *Ctx) Route() string {
+	path, ok := c.UserValue(MatchedRoutePathParam).(string)
+	if ok {
+		if namePaths, ok := c.UserValue(routeNamesKey).(StrMap); ok {
+			for name, pathx := range namePaths {
+				if pathx == path {
+					return name
+				}
+			}
+		}
+	}
+	return path
+}
 
 // SaveFile saves any multipart file to disk.
 func (*Ctx) SaveFile(fileheader *multipart.FileHeader, path string) error {
@@ -1378,4 +1399,8 @@ func (*Ctx) isLocalHost(address string) bool {
 // IsFromLocal will return true if request came from local.
 func (c *Ctx) IsFromLocal() bool {
 	return c.isLocalHost(c.RemoteIP().String())
+}
+
+func CopyString(s string) string {
+	return string(s2b(s))
 }

@@ -13,18 +13,18 @@ import (
 func main() {
 	app := fasthttp.New()
 
-	app.Use("", func(c *fasthttp.Ctx) error {
-		fmt.Println("global middleware 1")
+	app.Use(func(c *fasthttp.Ctx) error {
+		c.Set("X-MW-1", "1")
 		return nil
 	})
 
-	app.Use("", func(c *fasthttp.Ctx) error {
-		fmt.Println("global middleware 2")
+	app.Use(func(c *fasthttp.Ctx) error {
+		c.Set("X-MW-2", "2")
 		return nil
 	})
 
 	app.Get("/", func(c *fasthttp.Ctx) error {
-		fmt.Fprint(c, "Hello world!")
+		fmt.Fprint(c, "Hello world! "+c.Route())
 		return nil
 	}).Name("home")
 
@@ -64,13 +64,12 @@ func main() {
 	api := app.Group("/api")
 
 	api.Use(func(c *fasthttp.Ctx) error {
-		fmt.Println("api middleware 1")
-		c.Finish()
+		c.Set("X-A-MW-1", "1")
 		return nil
 	})
 
 	api.Use(func(c *fasthttp.Ctx) error {
-		fmt.Println("api middleware 2")
+		c.Set("X-A-MW-2", "2")
 		return nil
 	})
 
