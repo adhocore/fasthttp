@@ -126,12 +126,12 @@ func ServeFile(ctx *RequestCtx, path string) {
 var (
 	rootFSOnce sync.Once
 	rootFS     = &FS{
-		Root:               "",
-		AllowEmptyRoot:     true,
-		GenerateIndexPages: true,
-		Compress:           true,
-		CompressBrotli:     true,
-		AcceptByteRange:    true,
+		Root: "",
+		// AllowEmptyRoot:     true,
+		// GenerateIndexPages: true,
+		// Compress:           true,
+		// CompressBrotli:     true,
+		AcceptByteRange: true,
 	}
 	rootFSHandler RequestHandler
 )
@@ -148,13 +148,13 @@ var (
 // See also ServeFile.
 func ServeFS(ctx *RequestCtx, filesystem fs.FS, path string) {
 	f := &FS{
-		FS:                 filesystem,
-		Root:               "",
-		AllowEmptyRoot:     true,
-		GenerateIndexPages: true,
-		Compress:           true,
-		CompressBrotli:     true,
-		AcceptByteRange:    true,
+		FS:   filesystem,
+		Root: "",
+		// AllowEmptyRoot:     true,
+		// GenerateIndexPages: true,
+		// Compress:           true,
+		// CompressBrotli:     true,
+		AcceptByteRange: true,
 	}
 	handler := f.NewRequestHandler()
 
