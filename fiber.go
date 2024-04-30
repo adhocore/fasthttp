@@ -887,10 +887,12 @@ func (c *Ctx) Paths() string {
 func (c *Ctx) FormParams() map[string][]string {
 	form := map[string][]string{}
 	c.QueryArgs().VisitAll(func(key, value []byte) {
-		form[b2s(key)] = []string{b2s(value)}
+		k := b2s(key)
+		form[k] = append(form[k], b2s(value))
 	})
 	c.PostArgs().VisitAll(func(key, value []byte) {
-		form[b2s(key)] = []string{b2s(value)}
+		k := b2s(key)
+		form[k] = append(form[k], b2s(value))
 	})
 	mf, err := c.MultipartForm()
 	if err == nil && mf.Value != nil {
