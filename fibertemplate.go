@@ -47,6 +47,8 @@ func Renderer(dir, ext string, reload bool, fs http.FileSystem) *Render {
 
 func (r *Render) EmbedFS(fs *embed.FS) *Render {
 	r.fs = http.FS(fs)
+	// for FS path must be absolute
+	r.Directory = strings.TrimLeft(r.Directory, ".")
 	return r
 }
 
@@ -55,13 +57,15 @@ func (r *Render) AddFunc(f string, fn any) *Render {
 	return r
 }
 
-func (e *Render) Load() *Render {
-	if !e.Reload && e.ok {
-		return e
+func (r *Render) Load() *Render {
+	if !r.Reload && r.ok {
+		return r
 	}
 
-	e.t = template.New(e.Directory)
-	e.t.Funcs(e.fns)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.t = template.New(r.Directory)
+	r.t.Funcs(r.fns)
 
 	walkFn := func(path string, info fs.FileInfo, err error) error {
 		// Return error if exist
@@ -75,46 +79,46 @@ func (e *Render) Load() *Render {
 		}
 
 		// Skip file if it does not equal the given template Extension
-		if len(e.Extension) >= len(path) || path[len(path)-len(e.Extension):] != e.Extension {
+		if len(r.Extension) >= len(path) || path[len(path)-len(r.Extension):] != r.Extension {
 			return nil
 		}
 
 		// Get the relative file path
 		// ./views/html/index.tmpl -> index.tmpl
-		rel, err := filepath.Rel(e.Directory, path)
+		rel, err := filepath.Rel(r.Directory, path)
 		if err != nil {
 			return err
 		}
 
 		// Reverse slashes '\' -> '/' and ext
-		name := strings.TrimSuffix(filepath.ToSlash(rel), e.Extension)
-		buf, err := readFile(path, e.fs)
+		name := strings.TrimSuffix(filepath.ToSlash(rel), r.Extension)
+		buf, err := readFile(path, r.fs)
 		if err != nil {
 			return err
 		}
 
 		// Create new template associated with the current one
 		// This enable use to invoke other templates {{ template .. }}
-		_, err = e.t.New(name).Parse(string(buf))
+		_, err = r.t.New(name).Parse(string(buf))
 		return err
 	}
 
-	if e.fs != nil {
-		walker(e.fs, e.Directory, walkFn)
+	if r.fs != nil {
+		walker(r.fs, r.Directory, walkFn)
 	} else {
-		filepath.Walk(e.Directory, walkFn)
+		filepath.Walk(r.Directory, walkFn)
 	}
-	e.ok = true
-	return e
+	r.ok = true
+	return r
 }
 
-func (e *Render) Render(out io.Writer, name string, binding Map, layouts ...string) (err error) {
-	e.mu.RLock()
-	if e.Reload {
-		e.Load()
+func (r *Render) Render(out io.Writer, name string, binding Map, layouts ...string) (err error) {
+	if r.Reload {
+		r.Load()
 	}
-	tmpl := e.t.Lookup(name)
-	e.mu.RUnlock()
+	r.mu.RLock()
+	tmpl := r.t.Lookup(name)
+	r.mu.RUnlock()
 
 	if tmpl == nil {
 		return errors.New("template not found: " + name)
@@ -125,15 +129,15 @@ func (e *Render) Render(out io.Writer, name string, binding Map, layouts ...stri
 		return render()
 	}
 
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	// construct a nested render function to embed templates in layouts
 	for _, ln := range layouts {
 		if ln == "" {
 			break
 		}
-		lay := e.t.Lookup(ln)
+		lay := r.t.Lookup(ln)
 		if lay == nil {
 			return fmt.Errorf("render: LayoutName %s does not exist", ln)
 		}
