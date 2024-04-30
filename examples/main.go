@@ -8,10 +8,13 @@ import (
 	"syscall"
 
 	"github.com/adhocore/fasthttp"
+	"github.com/adhocore/fasthttp/prefork"
 )
 
 func main() {
 	app := fasthttp.New()
+
+	usePrefork := len(os.Args) > 1 && os.Args[1] == "-prefork"
 
 	app.Use(func(c *fasthttp.Ctx) error {
 		c.Set("X-MW-1", "1")
@@ -24,7 +27,7 @@ func main() {
 	})
 
 	app.Get("/", func(c *fasthttp.Ctx) error {
-		fmt.Fprint(c, "Hello world! "+c.Route())
+		fmt.Fprint(c, "Hello world!")
 		return nil
 	}).Name("home")
 
@@ -86,14 +89,21 @@ func main() {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGABRT)
 
+	if !usePrefork {
+		go func() {
+			fmt.Println("fasthttp sock on http://fastsock.lvh.me")
+			app.ServeUnix("/home/jiten/fast.sock")
+		}()
+	}
 	go func() {
-		fmt.Println("fasthttp sock on http://fastsock.lvh.me")
-		app.ServeUnix("/home/jiten/fast.sock")
+		port := ":8080"
+		fmt.Println("fasthttp tcp on http://0.0.0.0" + port + " http://fast.lvh.me")
+		if usePrefork {
+			prefork.Serve(app, port)
+		} else {
+			app.Serve(port)
+		}
 	}()
-	// go func() {
-	// 	fmt.Println("fasthttp tcp on http://0.0.0.0:8080 http://fast.lvh.me")
-	// 	app.Serve(":8080")
-	// }()
 
 	var wg sync.WaitGroup
 	wg.Add(1)

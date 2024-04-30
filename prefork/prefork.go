@@ -94,6 +94,14 @@ func New(s *fasthttp.Server) *Prefork {
 	}
 }
 
+// Serve serves the app with preforked processes.
+func Serve(app *fasthttp.App, addr string) error {
+	if app.Server.Handler == nil {
+		app.Server.Handler = app.Handler
+	}
+	return New(app.Server).ListenAndServe(addr)
+}
+
 func (p *Prefork) logger() Logger {
 	if p.Logger != nil {
 		return p.Logger
