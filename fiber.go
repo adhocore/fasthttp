@@ -128,14 +128,16 @@ type ErrorHandler func(*RequestCtx, error)
 type Map = map[string]any
 type StrMap = map[string]string
 
+// App is application
 type App struct {
-	Server *Server
-	View   *Render
 	*Router
+	*Server
+	View    *Render
 	uses    map[string][]Handle
 	usesPos []string
 }
 
+// New creates new App
 func New() *App {
 	return &App{
 		Server:  &Server{},
@@ -145,22 +147,28 @@ func New() *App {
 	}
 }
 
+// Serve serves over given tcp addr
 func (app *App) Serve(addr string) error {
-	if app.Server.Handler == nil {
-		app.Server.Handler = app.Handler
-	}
-	return app.Server.ListenAndServe(addr)
+	return app.ServerHandler().ListenAndServe(addr)
 }
 
 var sockMode os.FileMode = os.ModeSocket | 0660 // ug+rw
 
-func (app *App) ServeUnix(addr string) error {
-	if app.Server.Handler == nil {
-		app.Server.Handler = app.Handler
-	}
-	return app.Server.ListenAndServeUNIX(addr, sockMode)
+// ServeUnix serves over given unix socket path
+func (app *App) ServeUnix(path string) error {
+	return app.ServerHandler().ListenAndServeUNIX(path, sockMode)
 }
 
+// ServerHandler (re)sets handler for server and returns it
+func (app *App) ServerHandler(reset ...bool) *Server {
+	if app.Server.Handler == nil || (len(reset) > 0 && reset[0]) {
+		app.Server.Handler = app.Handler
+	}
+	return app.Server
+}
+
+// Use registers pre middlewares (that executes before the main handler)
+// Middlewares do not match request methods but the request path prefix ONLY
 func (app *App) Use(handle Handle) {
 	app.use("", handle)
 }
@@ -174,25 +182,39 @@ func (app *App) use(path string, handle Handle) {
 	app.uses[path] = append(app.uses[path], handle)
 }
 
+// GetPost registers same handler for GET and POST methods
 func (app *App) GetPost(path string, handle Handle) *Router {
 	return app.Get(path, handle).Post(path, handle)
 }
 
 const routeNamesKey = "_route_names_"
 const viewRendererKey = "_view_renderer_"
-const ReqStartKey = "_req_start_time_"
 
+// ReqStartTimeKey is request start time key
+const ReqStartTimeKey = "_req_start_time_"
+
+// Handler is the entry point of all request handlers
 func (app *App) Handler(c *Ctx) {
-	c.SetUserValue(ReqStartKey, time.Now())
-	if app.View != nil {
-		c.SetUserValue(viewRendererKey, app.View)
-	}
-	c.SetUserValue(routeNamesKey, app.Router.names)
+	c.SetUserValues(Map{
+		ReqStartTimeKey:  time.Now(),
+		viewRendererKey:  app.View,
+		routeNamesKey:    app.Router.names,
+		requestServedKey: false,
+	})
 	if err := app.Router.Serve(c, app.pipeThru); err != nil {
+		if err, ok := err.(*Error); ok {
+			c.SendError(err)
+			return
+		}
+		if app.PanicHandler != nil {
+			app.PanicHandler(c, err)
+			return
+		}
 		c.SendStatus(StatusInternalServerError)
 	}
 }
 
+// pipeThru runs request through middleware pipes (in order of their registration)
 func (app *App) pipeThru(path string, handle Handle, c *Ctx) (err error) {
 	for _, p := range app.usesPos {
 		if p == path || strings.HasPrefix(path+"/", p+"/") {
@@ -206,52 +228,55 @@ func (app *App) pipeThru(path string, handle Handle, c *Ctx) (err error) {
 	return handle(c)
 }
 
+// Group is route subgroup
 type Group struct {
 	app    *App
 	Prefix string
 }
 
+// Group creates router subgroup with prefix
 func (app *App) Group(prefix string) *Group {
 	return &Group{app: app, Prefix: prefix}
 }
 
+// GetPost registers same handler for GET and POST methods
 func (r *Group) GetPost(path string, handle Handle) *Router {
 	r.Get(path, handle) // can't use fluent
 	return r.Post(path, handle)
 }
 
-// GET is a shortcut for router.Handle(MethodGet, path, handle)
+// Get is a shortcut Handle(MethodGet, path, handle)
 func (r *Group) Get(path string, handle Handle) *Router {
 	r.Handle(MethodHead, path, handle)
 	return r.Handle(MethodGet, path, handle)
 }
 
-// HEAD is a shortcut for router.handle(MethodHead, path, handle)
+// Head is a shortcut handle(MethodHead, path, handle)
 func (r *Group) Head(path string, handle Handle) *Router {
 	return r.Handle(MethodHead, path, handle)
 }
 
-// OPTIONS is a shortcut for router.handle(MethodOptions, path, handle)
+// Options is a shortcut handle(MethodOptions, path, handle)
 func (r *Group) Options(path string, handle Handle) *Router {
 	return r.Handle(MethodOptions, path, handle)
 }
 
-// POST is a shortcut for router.handle(MethodPost, path, handle)
+// Post is a shortcut handle(MethodPost, path, handle)
 func (r *Group) Post(path string, handle Handle) *Router {
 	return r.Handle(MethodPost, path, handle)
 }
 
-// PUT is a shortcut for router.handle(MethodPut, path, handle)
+// Put is a shortcut handle(MethodPut, path, handle)
 func (r *Group) Put(path string, handle Handle) *Router {
 	return r.Handle(MethodPut, path, handle)
 }
 
-// PATCH is a shortcut for router.handle(MethodPatch, path, handle)
+// Patch is a shortcut handle(MethodPatch, path, handle)
 func (r *Group) Patch(path string, handle Handle) *Router {
 	return r.Handle(MethodPatch, path, handle)
 }
 
-// DELETE is a shortcut for router.handle(MethodDelete, path, handle)
+// Delete is a shortcut handle(MethodDelete, path, handle)
 func (r *Group) Delete(path string, handle Handle) *Router {
 	return r.Handle(MethodDelete, path, handle)
 }
@@ -261,6 +286,8 @@ func (r *Group) Handle(method, path string, handle Handle) *Router {
 	return r.app.Handle(method, r.Prefix+path, handle)
 }
 
+// Use registers pre middlewares (that executes before the main handler)
+// Middlewares do not match request methods but the request path prefix ONLY
 func (r *Group) Use(handle Handle) {
 	r.app.use(r.Prefix, handle)
 }
@@ -276,9 +303,9 @@ func (e *Error) Error() string {
 	return e.Message
 }
 
-func (e *Error) WithMessage(s string) *Error {
-	e.Message = s
-	return e
+// WithMessage (re)sets the Error message
+func (e Error) WithMessage(s string) *Error {
+	return &Error{Code: e.Code, Message: s}
 }
 
 // NewError creates a new Error instance with an optional message
@@ -436,31 +463,6 @@ func (c *Ctx) Body() []byte {
 	return body
 }
 
-func ParseVendorSpecificContentType(cType string) string {
-	plusIndex := strings.Index(cType, "+")
-
-	if plusIndex == -1 {
-		return cType
-	}
-
-	var parsableType string
-	if semiColonIndex := strings.Index(cType, ";"); semiColonIndex == -1 {
-		parsableType = cType[plusIndex+1:]
-	} else if plusIndex < semiColonIndex {
-		parsableType = cType[plusIndex+1 : semiColonIndex]
-	} else {
-		return cType[:semiColonIndex]
-	}
-
-	slashIndex := strings.Index(cType, "/")
-
-	if slashIndex == -1 {
-		return cType
-	}
-
-	return cType[0:slashIndex+1] + parsableType
-}
-
 // BodyParser binds the request body to a struct.
 // It supports decoding the following content types based on the Content-Type header:
 // application/json, application/xml, application/x-www-form-urlencoded, multipart/form-data
@@ -515,6 +517,8 @@ type RangeSet struct {
 	End   int
 }
 
+// Cookiex is a cookie with exported string fields
+// Use like c.Cookie(&Cookiex{Name: "...", Value: "..."})
 type Cookiex struct {
 	Expires     time.Time      `json:"expires"`
 	Name        string         `json:"name"`
@@ -529,6 +533,7 @@ type Cookiex struct {
 }
 
 // Cookie sets a cookie by passing a cookie struct.
+// Use like c.Cookie(&Cookiex{Name: "...", Value: "..."})
 func (c *Ctx) Cookie(cookie *Cookiex) {
 	fcookie := AcquireCookie()
 	fcookie.SetKey(cookie.Name)
@@ -854,11 +859,13 @@ func (c *Ctx) ClientHelloInfo() *tls.ClientHelloInfo {
 
 const requestServedKey = "_request_served_"
 
+// Finish marks request as finished to be used by pre middlewares
 func (c *Ctx) Finish() error {
 	c.SetUserValue(requestServedKey, true)
 	return nil
 }
 
+// Served tells is request is served already
 func (c *Ctx) Served() bool {
 	v, ok := c.UserValue(requestServedKey).(bool)
 	return v && ok
@@ -871,6 +878,7 @@ func (c *Ctx) OriginalURL() string {
 	return b2s(c.Request.Header.RequestURI())
 }
 
+// Methods gives method string
 func (c *Ctx) Methods() string {
 	return b2s(c.Method())
 }
@@ -880,10 +888,12 @@ func (c *Ctx) Next() error {
 	return nil
 }
 
+// Paths gives request path string without query
 func (c *Ctx) Paths() string {
 	return b2s(c.URI().Path())
 }
 
+// FormParams give request form params from GET+POST+FILES
 func (c *Ctx) FormParams() map[string][]string {
 	form := map[string][]string{}
 	c.QueryArgs().VisitAll(func(key, value []byte) {
@@ -903,8 +913,9 @@ func (c *Ctx) FormParams() map[string][]string {
 	return form
 }
 
-func (c *Ctx) FormValues(key string) string {
-	return b2s(c.FormValue(key))
+// FormValues gives form value from request in order GET > POST > FILES
+func (c *Ctx) FormValues(key string, defaultValue ...string) string {
+	return defaultString(b2s(c.FormValue(key)), defaultValue)
 }
 
 // Params is used to get the route parameters.
@@ -1256,9 +1267,9 @@ func (c *Ctx) Render(name string, bind Map, layouts ...string) error {
 	return nil
 }
 
-// Route returns the matched Route name.
+// Route returns the matched Route name (returns route path if name not set).
 func (c *Ctx) Route() string {
-	path, ok := c.UserValue(MatchedRoutePathParam).(string)
+	path, ok := c.UserValue(MatchedRoutePathKey).(string)
 	if ok {
 		if namePaths, ok := c.UserValue(routeNamesKey).(StrMap); ok {
 			for name, pathx := range namePaths {
@@ -1268,6 +1279,12 @@ func (c *Ctx) Route() string {
 			}
 		}
 	}
+	return path
+}
+
+// RoutePath is the actual path used in route definition.
+func (c *Ctx) RoutePath() string {
+	path, _ := c.UserValue(MatchedRoutePathKey).(string)
 	return path
 }
 
@@ -1302,6 +1319,14 @@ func (c *Ctx) SendStatus(status int) error {
 	return nil
 }
 
+// SendError sends HTTP Error
+// Use like c.SendError(fasthttp.ErrBadRequest), OR
+//
+//	c.SendError(fasthttp.ErrBadRequest.WithMessage("can't parse user input"))
+func (c *Ctx) SendError(err *Error) {
+	c.Error(err.Message, err.Code)
+}
+
 // SendString sets the HTTP response body for string types.
 // This means no type assertion, recommended for faster performance
 func (c *Ctx) SendString(body string) error {
@@ -1324,6 +1349,13 @@ func (c *Ctx) SendStream(stream io.Reader, size ...int) error {
 // Set sets the response's HTTP header field to the specified key, value.
 func (c *Ctx) Set(key, val string) {
 	c.Response.Header.Set(key, val)
+}
+
+// SetUserValues sets many user values using Map
+func (c *Ctx) SetUserValues(vals Map) {
+	for k, v := range vals {
+		c.SetUserValue(k, v)
+	}
 }
 
 func (c *Ctx) setCanonical(key, val string) {
@@ -1382,6 +1414,7 @@ func (c *Ctx) XHR() bool {
 	return bytes.EqualFold(c.Request.Header.Peek(HeaderXRequestedWith), []byte("xmlhttprequest"))
 }
 
+// IsProxyTrusted (not implemented yet)
 func (c *Ctx) IsProxyTrusted() bool {
 	return true
 }
@@ -1403,6 +1436,14 @@ func (c *Ctx) IsFromLocal() bool {
 	return c.isLocalHost(c.RemoteIP().String())
 }
 
+// CopyString copies a string
 func CopyString(s string) string {
 	return string(s2b(s))
+}
+
+// CopyBytes copies []byte
+func CopyBytes(b []byte) []byte {
+	tmp := make([]byte, len(b))
+	copy(tmp, b)
+	return tmp
 }
