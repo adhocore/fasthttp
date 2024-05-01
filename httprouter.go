@@ -231,10 +231,6 @@ type Router struct {
 	// RedirectTrailingSlash is independent of this option.
 	RedirectFixedPath bool
 
-	// Configurable Handler which is called when no matching route is
-	// found. If it is not set, NotFound is used.
-	NotFound Handle
-
 	// Function to handle panics recovered from http handlers.
 	// It should be used to generate a error page and return the http error code
 	// 500 (Internal Server Error).
@@ -243,8 +239,9 @@ type Router struct {
 	PanicHandler ErrorHandler
 
 	// New
-	last  string
-	names map[string]string
+	last   string            // last registered path
+	names  map[string]string // name => registered path
+	static map[string]Handle // static handlers
 }
 
 // NewRouter returns a new initialized Router.
@@ -254,6 +251,7 @@ func NewRouter() *Router {
 		RedirectTrailingSlash: true,
 		RedirectFixedPath:     true,
 		names:                 make(map[string]string),
+		static:                make(map[string]Handle),
 	}
 }
 
@@ -314,7 +312,6 @@ func (r *Router) Delete(path string, handle Handle) *Router {
 // frequently used, non-standardized or custom methods (e.g. for internal
 // communication with a proxy).
 func (r *Router) Handle(method, path string, handle Handle) *Router {
-	varsCount := uint16(0)
 	pathName := strings.SplitN(path, "#", 2)
 	path = pathName[0]
 
@@ -332,7 +329,15 @@ func (r *Router) Handle(method, path string, handle Handle) *Router {
 		r.Name(pathName[1])
 	}
 
-	varsCount++
+	paramsCount := countParams(path)
+	if paramsCount == 0 {
+		if _, ok := r.static[method+path]; ok {
+			panic("a handle is already registered for path '" + path + "'")
+		}
+
+		r.static[method+path] = handle
+		return r
+	}
 
 	if r.trees == nil {
 		r.trees = make(map[string]*node)
@@ -347,8 +352,8 @@ func (r *Router) Handle(method, path string, handle Handle) *Router {
 	root.addRoute(path, handle)
 
 	// Update maxParams
-	if paramsCount := countParams(path); paramsCount+varsCount > r.maxParams {
-		r.maxParams = paramsCount + varsCount
+	if paramsCount > r.maxParams {
+		r.maxParams = paramsCount
 	}
 
 	// Lazy-init paramsPool alloc func
@@ -388,6 +393,9 @@ func (r *Router) recv(c *Ctx) {
 // values. Otherwise the third return value indicates whether a redirection to
 // the same path with an extra / without the trailing slash should be performed.
 func (r *Router) Lookup(method, path string) (Handle, string, Params, bool) {
+	if handle, ok := r.static[method+path]; ok {
+		return handle, path, nil, false
+	}
 	if root := r.trees[method]; root != nil {
 		handle, rpath, ps, tsr := root.getValue(path, r.getParams)
 		if handle == nil {
@@ -408,21 +416,27 @@ func (r *Router) Serve(c *Ctx, middleware func(string, Handle, *Ctx) error) (err
 		defer r.recv(c)
 	}
 
-	meth := b2s(c.Method())
-	root := r.trees[meth]
+	method := b2s(c.Method())
+	path := b2s(c.URI().Path())
+
+	if handle, ok := r.static[method+path]; ok {
+		c.SetUserValues(Map{MatchedRoutePathKey: path})
+		return middleware(path, handle, c)
+	}
+
+	root := r.trees[method]
 	if root == nil {
 		return c.SendStatus(StatusBadRequest)
 	}
 
-	path := b2s(c.URI().Path())
 	if handle, rpath, ps, tsr := root.getValue(path, r.getParams); handle != nil {
 		c.SetUserValues(Map{MatchedRoutePathKey: rpath, routeParamKey: ps})
 		defer r.putParams(ps)
 		return middleware(path, handle, c)
-	} else if meth != MethodConnect && path != "/" {
+	} else if method != MethodConnect && path != "/" {
 		// Moved Permanently, request with GET method
 		code := StatusTemporaryRedirect
-		if meth != MethodGet {
+		if method != MethodGet {
 			// Permanent Redirect, request with same method
 			code = StatusPermanentRedirect
 		}
