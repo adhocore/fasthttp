@@ -133,6 +133,7 @@ type App struct {
 	*Router
 	*Server
 	View    *Render
+	Start   time.Time
 	uses    map[string][]Handle
 	usesPos []string
 }
@@ -142,6 +143,7 @@ func New() *App {
 	return &App{
 		Server:  &Server{},
 		Router:  NewRouter(),
+		Start:   time.Now(),
 		uses:    make(map[string][]Handle, 0),
 		usesPos: make([]string, 0),
 	}
