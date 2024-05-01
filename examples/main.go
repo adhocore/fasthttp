@@ -14,15 +14,15 @@ import (
 func main() {
 	app := fasthttp.New()
 
-	usePrefork := len(os.Args) > 1 && os.Args[1] == "-prefork"
-
 	app.Use(func(c *fasthttp.Ctx) error {
-		c.Set("X-MW-1", "1")
+		c.Append("X-Middleware", "Global#1")
+		c.Set("X-Route", c.Route())
 		return nil
 	})
 
 	app.Use(func(c *fasthttp.Ctx) error {
-		c.Set("X-MW-2", "2")
+		c.Append("X-Middleware", "Global#2")
+		c.Set("X-Route-Path", c.RoutePath())
 		return nil
 	})
 
@@ -67,12 +67,12 @@ func main() {
 	api := app.Group("/api")
 
 	api.Use(func(c *fasthttp.Ctx) error {
-		c.Set("X-A-MW-1", "1")
+		c.Append("X-Middleware", "API#1")
 		return nil
 	})
 
 	api.Use(func(c *fasthttp.Ctx) error {
-		c.Set("X-A-MW-2", "2")
+		c.Append("X-Middleware", "API#2")
 		return nil
 	})
 
@@ -80,6 +80,10 @@ func main() {
 		fmt.Fprint(c, "api /")
 		return nil
 	}).Name("api_home")
+
+	api.Get("/any/*all", func(c *fasthttp.Ctx) error {
+		return nil
+	}).Name("api_any_all")
 
 	api.Get("/num/:num", func(c *fasthttp.Ctx) error {
 		fmt.Fprint(c, "api /num/:num")
@@ -89,12 +93,15 @@ func main() {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM, syscall.SIGABRT)
 
+	usePrefork := len(os.Args) > 1 && os.Args[1] == "-prefork"
+
 	if !usePrefork {
 		go func() {
 			fmt.Println("fasthttp sock on http://fastsock.lvh.me")
 			app.ServeUnix("/home/jiten/fast.sock")
 		}()
 	}
+
 	go func() {
 		port := ":8080"
 		fmt.Println("fasthttp tcp on http://0.0.0.0" + port + " http://fast.lvh.me")
@@ -110,7 +117,7 @@ func main() {
 
 	go func() {
 		<-sig
-		app.Server.Shutdown()
+		app.Shutdown()
 		wg.Done()
 	}()
 
