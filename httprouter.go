@@ -201,16 +201,9 @@ func ParamsFromContext(ctx context.Context) Params {
 	return p
 }
 
-// MatchedRoutePathParam is the Param name under which the path of the matched
+// MatchedRoutePathKey is the Param name under which the path of the matched
 // route is stored, if Router.SaveMatchedRoutePath is set.
-var MatchedRoutePathParam = "$matchedRoutePath"
-
-// MatchedRoutePath retrieves the path of the matched route.
-// Router.SaveMatchedRoutePath must have been enabled when the respective
-// handler was added, otherwise this function always returns an empty string.
-func (ps Params) MatchedRoutePath() string {
-	return ps.ByName(MatchedRoutePathParam)
-}
+const MatchedRoutePathKey = "_matched_route_path_"
 
 // Router is a Handler which can be used to dispatch requests to different
 // handler functions via configurable routes
@@ -276,45 +269,38 @@ func (r *Router) putParams(ps *Params) {
 	}
 }
 
-func (r *Router) saveMatchedRoutePath(path string, handle Handle) Handle {
-	return func(c *Ctx) error {
-		c.SetUserValue(MatchedRoutePathParam, path)
-		return handle(c)
-	}
-}
-
-// GET is a shortcut for router.Handle(MethodGet, path, handle)
+// Get is a shortcut for router.Handle(MethodGet, path, handle)
 func (r *Router) Get(path string, handle Handle) *Router {
 	r.Handle(MethodHead, path, handle)
 	return r.Handle(MethodGet, path, handle)
 }
 
-// HEAD is a shortcut for router.Handle(MethodHead, path, handle)
+// Head is a shortcut for router.Handle(MethodHead, path, handle)
 func (r *Router) Head(path string, handle Handle) *Router {
 	return r.Handle(MethodHead, path, handle)
 }
 
-// OPTIONS is a shortcut for router.Handle(MethodOptions, path, handle)
+// Options is a shortcut for router.Handle(MethodOptions, path, handle)
 func (r *Router) Options(path string, handle Handle) *Router {
 	return r.Handle(MethodOptions, path, handle)
 }
 
-// POST is a shortcut for router.Handle(MethodPost, path, handle)
+// Post is a shortcut for router.Handle(MethodPost, path, handle)
 func (r *Router) Post(path string, handle Handle) *Router {
 	return r.Handle(MethodPost, path, handle)
 }
 
-// PUT is a shortcut for router.Handle(MethodPut, path, handle)
+// Put is a shortcut for router.Handle(MethodPut, path, handle)
 func (r *Router) Put(path string, handle Handle) *Router {
 	return r.Handle(MethodPut, path, handle)
 }
 
-// PATCH is a shortcut for router.Handle(MethodPatch, path, handle)
+// Patch is a shortcut for router.Handle(MethodPatch, path, handle)
 func (r *Router) Patch(path string, handle Handle) *Router {
 	return r.Handle(MethodPatch, path, handle)
 }
 
-// DELETE is a shortcut for router.Handle(MethodDelete, path, handle)
+// Delete is a shortcut for router.Handle(MethodDelete, path, handle)
 func (r *Router) Delete(path string, handle Handle) *Router {
 	return r.Handle(MethodDelete, path, handle)
 }
@@ -347,7 +333,6 @@ func (r *Router) Handle(method, path string, handle Handle) *Router {
 	}
 
 	varsCount++
-	handle = r.saveMatchedRoutePath(path, handle)
 
 	if r.trees == nil {
 		r.trees = make(map[string]*node)
@@ -377,6 +362,7 @@ func (r *Router) Handle(method, path string, handle Handle) *Router {
 	return r
 }
 
+// Name sets route to the last registered path
 func (r *Router) Name(name string) {
 	if path, ok := r.names[name]; ok && path != r.last {
 		panic(fmt.Errorf("route name %s already assigned for path %s", name, path))
@@ -385,30 +371,6 @@ func (r *Router) Name(name string) {
 }
 
 const routeParamKey = "_route_param_"
-
-// ServeFiles serves files from the given file system root.
-// The path must end with "/*filepath", files are then served from the local
-// path /defined/root/dir/*filepath.
-// For example if root is "/etc" and *filepath is "passwd", the local file
-// "/etc/passwd" would be served.
-// Internally a FileServer is used, therefore NotFound is used instead
-// of the Router's NotFound handler.
-// To use the operating system's file system implementation,
-// use Dir:
-//
-//	router.ServeFiles("/src/*filepath", Dir("/var/www"))
-// func (r *Router) ServeFiles(path string, root FileSystem) {
-// 	if len(path) < 10 || path[len(path)-10:] != "/*filepath" {
-// 		panic("path must end with /*filepath in path '" + path + "'")
-// 	}
-
-// 	fileServer := FileServer(root)
-
-// 	r.GET(path, func(w ResponseWriter, req *Request, ps Params) {
-// 		req.URL.Path = ps.ByName("filepath")
-// 		fileServer.ServeHTTP(w, req)
-// 	})
-// }
 
 func (r *Router) recv(c *Ctx) {
 	if rcv := recover(); rcv != nil {
@@ -425,19 +387,19 @@ func (r *Router) recv(c *Ctx) {
 // If the path was found, it returns the handle function and the path parameter
 // values. Otherwise the third return value indicates whether a redirection to
 // the same path with an extra / without the trailing slash should be performed.
-func (r *Router) Lookup(method, path string) (Handle, Params, bool) {
+func (r *Router) Lookup(method, path string) (Handle, string, Params, bool) {
 	if root := r.trees[method]; root != nil {
-		handle, ps, tsr := root.getValue(path, r.getParams)
+		handle, rpath, ps, tsr := root.getValue(path, r.getParams)
 		if handle == nil {
 			r.putParams(ps)
-			return nil, nil, tsr
+			return nil, rpath, nil, tsr
 		}
 		if ps == nil {
-			return handle, nil, tsr
+			return handle, rpath, nil, tsr
 		}
-		return handle, *ps, tsr
+		return handle, rpath, *ps, tsr
 	}
-	return nil, nil, false
+	return nil, "", nil, false
 }
 
 // ServeHTTP makes the router implement the Handler interface.
@@ -453,11 +415,10 @@ func (r *Router) Serve(c *Ctx, middleware func(string, Handle, *Ctx) error) (err
 	}
 
 	path := b2s(c.URI().Path())
-	if handle, ps, tsr := root.getValue(path, r.getParams); handle != nil {
-		c.SetUserValue(routeParamKey, ps)
-		middleware(path, handle, c)
-		r.putParams(ps)
-		return
+	if handle, rpath, ps, tsr := root.getValue(path, r.getParams); handle != nil {
+		c.SetUserValues(Map{MatchedRoutePathKey: rpath, routeParamKey: ps})
+		defer r.putParams(ps)
+		return middleware(path, handle, c)
 	} else if meth != MethodConnect && path != "/" {
 		// Moved Permanently, request with GET method
 		code := StatusTemporaryRedirect
@@ -472,8 +433,7 @@ func (r *Router) Serve(c *Ctx, middleware func(string, Handle, *Ctx) error) (err
 			} else {
 				path = path + "/"
 			}
-			c.Redirect(path, code)
-			return
+			return c.Redirects(path, code)
 		}
 
 		// Try to fix the request path
@@ -483,8 +443,7 @@ func (r *Router) Serve(c *Ctx, middleware func(string, Handle, *Ctx) error) (err
 				r.RedirectTrailingSlash,
 			)
 			if found {
-				c.Redirect(fixedPath, code)
-				return
+				return c.Redirects(fixedPath, code)
 			}
 		}
 	}
@@ -807,10 +766,11 @@ func (n *node) insertChild(path, fullPath string, handle Handle) {
 // If no handle can be found, a TSR (trailing slash redirect) recommendation is
 // made if a handle exists with an extra (without the) trailing slash for the
 // given path.
-func (n *node) getValue(path string, params func() *Params) (handle Handle, ps *Params, tsr bool) {
+func (n *node) getValue(path string, params func() *Params) (handle Handle, rpath string, ps *Params, tsr bool) {
 walk: // Outer loop for walking the tree
 	for {
 		prefix := n.path
+		rpath += prefix
 		if len(path) > len(prefix) {
 			if path[:len(prefix)] == prefix {
 				path = path[len(prefix):]
@@ -852,10 +812,8 @@ walk: // Outer loop for walking the tree
 						// Expand slice within preallocated capacity
 						i := len(*ps)
 						*ps = (*ps)[:i+1]
-						(*ps)[i] = Param{
-							Key:   n.path[1:],
-							Value: path[:end],
-						}
+						(*ps)[i] = Param{Key: n.path[1:], Value: path[:end]}
+						rpath += n.path
 					}
 
 					// We need to go deeper!
@@ -891,10 +849,8 @@ walk: // Outer loop for walking the tree
 						// Expand slice within preallocated capacity
 						i := len(*ps)
 						*ps = (*ps)[:i+1]
-						(*ps)[i] = Param{
-							Key:   n.path[2:],
-							Value: path,
-						}
+						(*ps)[i] = Param{Key: n.path[2:], Value: path}
+						rpath += n.path
 					}
 
 					handle = n.handle
