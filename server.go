@@ -358,6 +358,7 @@ type Server struct {
 
 	// We need to know our listeners and idle connections so we can close them in Shutdown().
 	ln []net.Listener
+	wp []*workerPool
 
 	idleConns   map[net.Conn]time.Time
 	idleConnsMu sync.Mutex
@@ -1478,6 +1479,7 @@ func (s *Server) Serve(ln net.Listener) error {
 		Logger:                s.logger(),
 		connState:             s.setState,
 	}
+	s.wp = append(s.wp, wp)
 	wp.Start()
 
 	// Count our waiting to accept a connection as an open connection.
@@ -1594,6 +1596,7 @@ END:
 
 	s.done = nil
 	s.ln = nil
+	s.wp = nil
 	return err
 }
 
@@ -1751,6 +1754,19 @@ func (s *Server) GetOpenConnectionsCount() int32 {
 // This function is intended be used by monitoring systems.
 func (s *Server) GetRejectedConnectionsCount() uint32 {
 	return atomic.LoadUint32(&s.rejectedRequestsCount)
+}
+
+// GetWorkersCount returns a number of workers.
+//
+// This function is intended be used by monitoring systems.
+func (s *Server) GetWorkersCount() (ct int) {
+	if s.wp == nil {
+		return
+	}
+	for _, wp := range s.wp {
+		ct += wp.workersCount
+	}
+	return
 }
 
 func (s *Server) getConcurrency() int {
