@@ -106,7 +106,7 @@ func ServeFile(ctx *RequestCtx, path string) {
 		var err error
 		path = filepath.FromSlash(path)
 		if path, err = filepath.Abs(path); err != nil {
-			ctx.Logger().Printf("cannot resolve path %q to absolute file path: %v", path, err)
+			// ctx.Logger().Printf("cannot resolve path %q to absolute file path: %v", path, err)
 			ctx.Error("Internal Server Error", StatusInternalServerError)
 			return
 		}
@@ -1016,7 +1016,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	path = stripTrailingSlashes(path)
 
 	if n := bytes.IndexByte(path, 0); n >= 0 {
-		ctx.Logger().Printf("cannot serve path with nil byte at position %d: %q", n, path)
+		// ctx.Logger().Printf("cannot serve path with nil byte at position %d: %q", n, path)
 		ctx.Error("Are you a hacker?", StatusBadRequest)
 		return
 	}
@@ -1025,7 +1025,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		// since ctx.Path must normalize and sanitize the path.
 
 		if n := bytes.Index(path, strSlashDotDotSlash); n >= 0 {
-			ctx.Logger().Printf("cannot serve path with '/../' at position %d due to security reasons: %q", n, path)
+			// ctx.Logger().Printf("cannot serve path with '/../' at position %d due to security reasons: %q", n, path)
 			ctx.Error("Internal Server Error", StatusInternalServerError)
 			return
 		}
@@ -1057,8 +1057,8 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		var err error
 		ff, err = h.openFSFile(filePath, mustCompress, fileEncoding)
 		if mustCompress && err == errNoCreatePermission {
-			ctx.Logger().Printf("insufficient permissions for saving compressed file for %q. Serving uncompressed file. "+
-				"Allow write access to the directory with this file in order to improve fasthttp performance", filePath)
+			// ctx.Logger().Printf("insufficient permissions for saving compressed file for %q. Serving uncompressed file. "+
+			// 	"Allow write access to the directory with this file in order to improve fasthttp performance", filePath)
 			mustCompress = false
 			ff, err = h.openFSFile(filePath, mustCompress, fileEncoding)
 		}
@@ -1069,12 +1069,12 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			}
 			ff, err = h.openIndexFile(ctx, filePath, mustCompress, fileEncoding)
 			if err != nil {
-				ctx.Logger().Printf("cannot open dir index %q: %v", filePath, err)
+				// ctx.Logger().Printf("cannot open dir index %q: %v", filePath, err)
 				ctx.Error("Directory index is forbidden", StatusForbidden)
 				return
 			}
 		} else if err != nil {
-			ctx.Logger().Printf("cannot open file %q: %v", filePath, err)
+			// ctx.Logger().Printf("cannot open file %q: %v", filePath, err)
 			if h.pathNotFound == nil {
 				ctx.Error("Cannot open requested path", StatusNotFound)
 			} else {
@@ -1095,7 +1095,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 
 	r, err := ff.NewReader()
 	if err != nil {
-		ctx.Logger().Printf("cannot obtain file reader for path=%q: %v", path, err)
+		// ctx.Logger().Printf("cannot obtain file reader for path=%q: %v", path, err)
 		ctx.Error("Internal Server Error", StatusInternalServerError)
 		return
 	}
@@ -1116,14 +1116,14 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			startPos, endPos, err := ParseByteRange(byteRange, contentLength)
 			if err != nil {
 				_ = r.(io.Closer).Close()
-				ctx.Logger().Printf("cannot parse byte range %q for path=%q: %v", byteRange, path, err)
+				// ctx.Logger().Printf("cannot parse byte range %q for path=%q: %v", byteRange, path, err)
 				ctx.Error("Range Not Satisfiable", StatusRequestedRangeNotSatisfiable)
 				return
 			}
 
 			if err = r.(byteRangeUpdater).UpdateByteRange(startPos, endPos); err != nil {
 				_ = r.(io.Closer).Close()
-				ctx.Logger().Printf("cannot seek byte range %q for path=%q: %v", byteRange, path, err)
+				// ctx.Logger().Printf("cannot seek byte range %q for path=%q: %v", byteRange, path, err)
 				ctx.Error("Internal Server Error", StatusInternalServerError)
 				return
 			}
@@ -1143,7 +1143,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		ctx.Response.Header.SetContentLength(contentLength)
 		if rc, ok := r.(io.Closer); ok {
 			if err := rc.Close(); err != nil {
-				ctx.Logger().Printf("cannot close file reader: %v", err)
+				// ctx.Logger().Printf("cannot close file reader: %v", err)
 				ctx.Error("Internal Server Error", StatusInternalServerError)
 				return
 			}
@@ -1276,8 +1276,7 @@ nestedContinue:
 		}
 		fi, err := de.Info()
 		if err != nil {
-			ctx.Logger().Printf("cannot fetch information from dir entry %q: %v, skip", name, err)
-
+			// ctx.Logger().Printf("cannot fetch information from dir entry %q: %v, skip", name, err)
 			continue nestedContinue
 		}
 
