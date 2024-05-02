@@ -196,10 +196,6 @@ type Server struct {
 	// By default unlimited number of requests may be served per connection.
 	MaxRequestsPerConn int
 
-	// MaxKeepaliveDuration is a no-op and only left here for backwards compatibility.
-	// Deprecated: Use IdleTimeout instead.
-	MaxKeepaliveDuration time.Duration
-
 	// MaxIdleWorkerDuration is the maximum idle time of a single worker in the underlying
 	// worker pool of the Server. Idle workers beyond this time will be cleared.
 	MaxIdleWorkerDuration time.Duration

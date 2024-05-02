@@ -139,9 +139,12 @@ type App struct {
 }
 
 // New creates new App
-func New() *App {
+func New(server ...*Server) *App {
+	if len(server) == 0 {
+		server = append(server, &Server{})
+	}
 	return &App{
-		Server:  &Server{},
+		Server:  server[0],
 		Router:  NewRouter(),
 		Start:   time.Now(),
 		uses:    make(map[string][]Handle, 0),
