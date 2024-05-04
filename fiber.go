@@ -1216,10 +1216,16 @@ func (c *Ctx) mergeBind(vars Map) Map {
 
 // GetRouteURL generates URLs to named routes, with parameters. URLs are relative, for example: "/user/1831"
 func (c *Ctx) GetRouteURL(routeName string, params Map) (string, error) {
+	q := "queries"
 	if names, ok := c.UserValue(routeNamesKey).(StrMap); ok && names[routeName] != "" {
 		uri := names[routeName]
 		for k, v := range params {
-			uri = strings.Replace(uri, ":"+k, fmt.Sprintf("%v", v), 1)
+			if k != q {
+				uri = strings.Replace(uri, ":"+k, fmt.Sprintf("%v", v), 1)
+			}
+		}
+		if qry, ok := params[q].(string); ok && qry != "" {
+			uri += "?" + qry
 		}
 		return uri, nil
 	}
