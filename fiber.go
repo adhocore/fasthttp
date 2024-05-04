@@ -325,6 +325,11 @@ func NewError(code int, message ...string) *Error {
 	return err
 }
 
+// Server returns the Server instance
+func (c *Ctx) Server() *Server {
+	return c.s
+}
+
 // Accepts checks if the specified extensions or content types are acceptable.
 func (c *Ctx) Accepts(offers ...string) string {
 	if len(offers) == 0 {
