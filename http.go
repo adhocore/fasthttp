@@ -3,7 +3,6 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
-	"compress/gzip"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -457,62 +456,8 @@ var (
 	requestBodyPool  bytebufferpool.Pool
 )
 
-// BodyGunzip returns un-gzipped body data.
-//
-// This method may be used if the request header contains
-// 'Content-Encoding: gzip' for reading un-gzipped body.
-// Use Body for reading gzipped request body.
-func (req *Request) BodyGunzip() ([]byte, error) {
-	return gunzipData(req.Body())
-}
-
-// BodyGunzip returns un-gzipped body data.
-//
-// This method may be used if the response header contains
-// 'Content-Encoding: gzip' for reading un-gzipped body.
-// Use Body for reading gzipped response body.
-func (resp *Response) BodyGunzip() ([]byte, error) {
-	return gunzipData(resp.Body())
-}
-
-func gunzipData(p []byte) ([]byte, error) {
-	var bb bytebufferpool.ByteBuffer
-	_, err := WriteGunzip(&bb, p)
-	if err != nil {
-		return nil, err
-	}
-	return bb.B, nil
-}
-
-// BodyInflate returns inflated body data.
-//
-// This method may be used if the response header contains
-// 'Content-Encoding: deflate' for reading inflated request body.
-// Use Body for reading deflated request body.
-func (req *Request) BodyInflate() ([]byte, error) {
-	return inflateData(req.Body())
-}
-
-// BodyInflate returns inflated body data.
-//
-// This method may be used if the response header contains
-// 'Content-Encoding: deflate' for reading inflated response body.
-// Use Body for reading deflated response body.
-func (resp *Response) BodyInflate() ([]byte, error) {
-	return inflateData(resp.Body())
-}
-
 func (ctx *RequestCtx) RequestBodyStream() io.Reader {
 	return ctx.Request.bodyStream
-}
-
-func inflateData(p []byte) ([]byte, error) {
-	var bb bytebufferpool.ByteBuffer
-	_, err := WriteInflate(&bb, p)
-	if err != nil {
-		return nil, err
-	}
-	return bb.B, nil
 }
 
 var ErrContentEncodingUnsupported = errors.New("unsupported Content-Encoding")
@@ -523,16 +468,7 @@ var ErrContentEncodingUnsupported = errors.New("unsupported Content-Encoding")
 // 'Content-Encoding' for reading uncompressed request body.
 // Use Body for reading the raw request body.
 func (req *Request) BodyUncompressed() ([]byte, error) {
-	switch string(req.Header.ContentEncoding()) {
-	case "":
-		return req.Body(), nil
-	case "deflate":
-		return req.BodyInflate()
-	case "gzip":
-		return req.BodyGunzip()
-	default:
-		return nil, ErrContentEncodingUnsupported
-	}
+	return nil, ErrContentEncodingUnsupported
 }
 
 // BodyUncompressed returns body data and if needed decompress it from gzip, deflate or Brotli.
@@ -541,16 +477,7 @@ func (req *Request) BodyUncompressed() ([]byte, error) {
 // 'Content-Encoding' for reading uncompressed response body.
 // Use Body for reading the raw response body.
 func (resp *Response) BodyUncompressed() ([]byte, error) {
-	switch string(resp.Header.ContentEncoding()) {
-	case "":
-		return resp.Body(), nil
-	case "deflate":
-		return resp.BodyInflate()
-	case "gzip":
-		return resp.BodyGunzip()
-	default:
-		return nil, ErrContentEncodingUnsupported
-	}
+	return nil, ErrContentEncodingUnsupported
 }
 
 // BodyWriteTo writes request body to w.
@@ -938,17 +865,12 @@ func (req *Request) MultipartForm() (*multipart.Form, error) {
 
 	var err error
 	ce := req.Header.peek(strContentEncoding)
+	if len(ce) > 0 {
+		return nil, fmt.Errorf("unsupported Content-Encoding: %q", ce)
+	}
 
 	if req.bodyStream != nil {
 		bodyStream := req.bodyStream
-		if bytes.Equal(ce, strGzip) {
-			// Do not care about memory usage here.
-			if bodyStream, err = gzip.NewReader(bodyStream); err != nil {
-				return nil, fmt.Errorf("cannot gunzip request body: %w", err)
-			}
-		} else if len(ce) > 0 {
-			return nil, fmt.Errorf("unsupported Content-Encoding: %q", ce)
-		}
 
 		mr := multipart.NewReader(bodyStream, req.multipartFormBoundary)
 		req.multipartForm, err = mr.ReadForm(8 * 1024)
@@ -957,14 +879,6 @@ func (req *Request) MultipartForm() (*multipart.Form, error) {
 		}
 	} else {
 		body := req.bodyBytes()
-		if bytes.Equal(ce, strGzip) {
-			// Do not care about memory usage here.
-			if body, err = AppendGunzipBytes(nil, body); err != nil {
-				return nil, fmt.Errorf("cannot gunzip request body: %w", err)
-			}
-		} else if len(ce) > 0 {
-			return nil, fmt.Errorf("unsupported Content-Encoding: %q", ce)
-		}
 
 		req.multipartForm, err = readMultipartForm(bytes.NewReader(body), req.multipartFormBoundary, len(body), len(body))
 		if err != nil {
@@ -1591,180 +1505,6 @@ func (req *Request) Write(w *bufio.Writer) error {
 		return fmt.Errorf("non-zero body for non-POST request. body=%q", body)
 	}
 	return err
-}
-
-// WriteGzip writes response with gzipped body to w.
-//
-// The method gzips response body and sets 'Content-Encoding: gzip'
-// header before writing response to w.
-//
-// WriteGzip doesn't flush response to w for performance reasons.
-func (resp *Response) WriteGzip(w *bufio.Writer) error {
-	return resp.WriteGzipLevel(w, CompressDefaultCompression)
-}
-
-// WriteGzipLevel writes response with gzipped body to w.
-//
-// Level is the desired compression level:
-//
-//   - CompressNoCompression
-//   - CompressBestSpeed
-//   - CompressBestCompression
-//   - CompressDefaultCompression
-//   - CompressHuffmanOnly
-//
-// The method gzips response body and sets 'Content-Encoding: gzip'
-// header before writing response to w.
-//
-// WriteGzipLevel doesn't flush response to w for performance reasons.
-func (resp *Response) WriteGzipLevel(w *bufio.Writer, level int) error {
-	resp.gzipBody(level)
-	return resp.Write(w)
-}
-
-// WriteDeflate writes response with deflated body to w.
-//
-// The method deflates response body and sets 'Content-Encoding: deflate'
-// header before writing response to w.
-//
-// WriteDeflate doesn't flush response to w for performance reasons.
-func (resp *Response) WriteDeflate(w *bufio.Writer) error {
-	return resp.WriteDeflateLevel(w, CompressDefaultCompression)
-}
-
-// WriteDeflateLevel writes response with deflated body to w.
-//
-// Level is the desired compression level:
-//
-//   - CompressNoCompression
-//   - CompressBestSpeed
-//   - CompressBestCompression
-//   - CompressDefaultCompression
-//   - CompressHuffmanOnly
-//
-// The method deflates response body and sets 'Content-Encoding: deflate'
-// header before writing response to w.
-//
-// WriteDeflateLevel doesn't flush response to w for performance reasons.
-func (resp *Response) WriteDeflateLevel(w *bufio.Writer, level int) error {
-	resp.deflateBody(level)
-	return resp.Write(w)
-}
-
-func (resp *Response) gzipBody(level int) {
-	if len(resp.Header.ContentEncoding()) > 0 {
-		// It looks like the body is already compressed.
-		// Do not compress it again.
-		return
-	}
-
-	if !resp.Header.isCompressibleContentType() {
-		// The content-type cannot be compressed.
-		return
-	}
-
-	if resp.bodyStream != nil {
-		// Reset Content-Length to -1, since it is impossible
-		// to determine body size beforehand of streamed compression.
-		// For https://github.com/valyala/fasthttp/issues/176 .
-		resp.Header.SetContentLength(-1)
-
-		// Do not care about memory allocations here, since gzip is slow
-		// and allocates a lot of memory by itself.
-		bs := resp.bodyStream
-		resp.bodyStream = NewStreamReader(func(sw *bufio.Writer) {
-			zw := acquireStacklessGzipWriter(sw, level)
-			fw := &flushWriter{
-				wf: zw,
-				bw: sw,
-			}
-			_, wErr := copyZeroAlloc(fw, bs)
-			releaseStacklessGzipWriter(zw, level)
-			switch v := bs.(type) {
-			case io.Closer:
-				v.Close()
-			case ReadCloserWithError:
-				v.CloseWithError(wErr) //nolint:errcheck
-			}
-		})
-	} else {
-		bodyBytes := resp.bodyBytes()
-		if len(bodyBytes) < minCompressLen {
-			// There is no sense in spending CPU time on small body compression,
-			// since there is a very high probability that the compressed
-			// body size will be bigger than the original body size.
-			return
-		}
-		w := responseBodyPool.Get()
-		w.B = AppendGzipBytesLevel(w.B, bodyBytes, level)
-
-		// Hack: swap resp.body with w.
-		if resp.body != nil {
-			responseBodyPool.Put(resp.body)
-		}
-		resp.body = w
-		resp.bodyRaw = nil
-	}
-	resp.Header.SetContentEncodingBytes(strGzip)
-	resp.Header.addVaryBytes(strAcceptEncoding)
-}
-
-func (resp *Response) deflateBody(level int) {
-	if len(resp.Header.ContentEncoding()) > 0 {
-		// It looks like the body is already compressed.
-		// Do not compress it again.
-		return
-	}
-
-	if !resp.Header.isCompressibleContentType() {
-		// The content-type cannot be compressed.
-		return
-	}
-
-	if resp.bodyStream != nil {
-		// Reset Content-Length to -1, since it is impossible
-		// to determine body size beforehand of streamed compression.
-		// For https://github.com/valyala/fasthttp/issues/176 .
-		resp.Header.SetContentLength(-1)
-
-		// Do not care about memory allocations here, since flate is slow
-		// and allocates a lot of memory by itself.
-		bs := resp.bodyStream
-		resp.bodyStream = NewStreamReader(func(sw *bufio.Writer) {
-			zw := acquireStacklessDeflateWriter(sw, level)
-			fw := &flushWriter{
-				wf: zw,
-				bw: sw,
-			}
-			_, wErr := copyZeroAlloc(fw, bs)
-			releaseStacklessDeflateWriter(zw, level)
-			switch v := bs.(type) {
-			case io.Closer:
-				v.Close()
-			case ReadCloserWithError:
-				v.CloseWithError(wErr) //nolint:errcheck
-			}
-		})
-	} else {
-		bodyBytes := resp.bodyBytes()
-		if len(bodyBytes) < minCompressLen {
-			// There is no sense in spending CPU time on small body compression,
-			// since there is a very high probability that the compressed
-			// body size will be bigger than the original body size.
-			return
-		}
-		w := responseBodyPool.Get()
-		w.B = AppendDeflateBytesLevel(w.B, bodyBytes, level)
-
-		// Hack: swap resp.body with w.
-		if resp.body != nil {
-			responseBodyPool.Put(resp.body)
-		}
-		resp.body = w
-		resp.bodyRaw = nil
-	}
-	resp.Header.SetContentEncodingBytes(strDeflate)
-	resp.Header.addVaryBytes(strAcceptEncoding)
 }
 
 // Bodies with sizes smaller than minCompressLen aren't compressed at all.

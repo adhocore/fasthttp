@@ -325,6 +325,11 @@ func NewError(code int, message ...string) *Error {
 	return err
 }
 
+// Server returns the *Server
+func (c *Ctx) Server() *Server {
+	return c.s
+}
+
 // Accepts checks if the specified extensions or content types are acceptable.
 func (c *Ctx) Accepts(offers ...string) string {
 	if len(offers) == 0 {
@@ -388,49 +393,6 @@ func (c *Ctx) BodyRaw() []byte {
 	return c.Request.Body()
 }
 
-func (c *Ctx) tryDecodeBodyInOrder(
-	originalBody *[]byte,
-	encodings []string,
-) ([]byte, uint8, error) {
-	var (
-		err             error
-		body            []byte
-		decodesRealized uint8
-	)
-
-	for index, encoding := range encodings {
-		decodesRealized++
-		switch encoding {
-		case StrGzip:
-			body, err = c.Request.BodyGunzip()
-		case StrDeflate:
-			body, err = c.Request.BodyInflate()
-		default:
-			decodesRealized--
-			if len(encodings) == 1 {
-				body = c.Request.Body()
-			}
-			return body, decodesRealized, nil
-		}
-
-		if err != nil {
-			return nil, decodesRealized, err
-		}
-
-		// Only execute body raw update if it has a next iteration to try to decode
-		if index < len(encodings)-1 && decodesRealized > 0 {
-			if index == 0 {
-				tempBody := c.Request.Body()
-				*originalBody = make([]byte, len(tempBody))
-				copy(*originalBody, tempBody)
-			}
-			c.Request.SetBodyRaw(body)
-		}
-	}
-
-	return body, decodesRealized, nil
-}
-
 // Body contains the raw body submitted in a POST request.
 // This method will decompress the body if the 'Content-Encoding' header is provided.
 // It returns the original (or decompressed) body data which is valid only within the handler.
@@ -438,34 +400,10 @@ func (c *Ctx) tryDecodeBodyInOrder(
 // If you need to keep the body's data later, make a copy or use the Immutable option.
 func (c *Ctx) Body() []byte {
 	var headerEncoding = strings.ReplaceAll(b2s(c.Request.Header.Peek(HeaderContentEncoding)), " ", "")
-	if headerEncoding == "" {
-		return c.Request.Body()
+	if headerEncoding != "" {
+		return []byte(ErrContentEncodingUnsupported.Error())
 	}
-
-	var (
-		err                error
-		body, originalBody []byte
-	)
-
-	// Split and get the encodings list, in order to attend the
-	// rule defined at: https://www.rfc-editor.org/rfc/rfc9110#section-8.4-5
-	encodingOrder := strings.Split(headerEncoding, ",")
-	if len(encodingOrder) == 0 {
-		return c.Request.Body()
-	}
-
-	var decodesRealized uint8
-	body, decodesRealized, err = c.tryDecodeBodyInOrder(&originalBody, encodingOrder)
-
-	// Ensure that the body will be the original
-	if originalBody != nil && decodesRealized > 0 {
-		c.Request.SetBodyRaw(originalBody)
-	}
-	if err != nil {
-		return []byte(err.Error())
-	}
-
-	return body
+	return c.Request.Body()
 }
 
 // BodyParser binds the request body to a struct.
@@ -1328,8 +1266,9 @@ func (c *Ctx) SendStatus(status int) error {
 // Use like c.SendError(fasthttp.ErrBadRequest), OR
 //
 //	c.SendError(fasthttp.ErrBadRequest.WithMessage("can't parse user input"))
-func (c *Ctx) SendError(err *Error) {
+func (c *Ctx) SendError(err *Error) error {
 	c.Error(err.Message, err.Code)
+	return nil
 }
 
 // SendString sets the HTTP response body for string types.
