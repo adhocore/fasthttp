@@ -1256,7 +1256,7 @@ func (c *Ctx) RedirectBack(fallback string, status ...int) error {
 
 func (c *Ctx) Redirects(location string, status ...int) error {
 	c.redirect(s2b(location), append(status, StatusFound)[0])
-	return nil
+	return c.Finish()
 }
 
 var ErrNoViewRenderer = errors.New("view renderer not configured")
