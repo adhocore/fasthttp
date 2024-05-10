@@ -117,7 +117,7 @@ type Server struct {
 	//   * ErrSmallBuffer
 	//   * ErrBodyTooLarge
 	//   * ErrBrokenChunks
-	ErrorHandler func(ctx *RequestCtx, err error)
+	ErrorHandler ErrorHandler
 
 	// HeaderReceived is called after receiving the header.
 	//

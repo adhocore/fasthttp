@@ -207,15 +207,13 @@ func (app *App) Handler(c *Ctx) {
 		requestServedKey: false,
 	})
 	if err := app.Router.Serve(c, app.pipeThru); err != nil {
-		if err, ok := err.(*Error); ok {
+		if app.ErrorHandler != nil {
+			app.ErrorHandler(c, err) // Prioritize user defined handler
+		} else if err, ok := err.(*Error); ok {
 			c.SendError(err)
-			return
+		} else { // Error maybe sensitive so just send status code
+			c.SendStatus(StatusInternalServerError)
 		}
-		if app.PanicHandler != nil {
-			app.PanicHandler(c, err)
-			return
-		}
-		c.SendStatus(StatusInternalServerError)
 	}
 }
 
@@ -242,6 +240,10 @@ type Group struct {
 // Group creates router subgroup with prefix
 func (app *App) Group(prefix string) *Group {
 	return &Group{app: app, Prefix: prefix}
+}
+
+func (r *Group) Group(prefix string) *Group {
+	return &Group{app: r.app, Prefix: r.Prefix + prefix}
 }
 
 // GetPost registers same handler for GET and POST methods
@@ -903,15 +905,17 @@ func (c *Ctx) Paths() string {
 	return b2s(c.URI().Path())
 }
 
+var formKeyRepl = strings.NewReplacer("[]", "", "[", ".", "]", "")
+
 // FormParams give request form params from GET+POST+FILES
 func (c *Ctx) FormParams() map[string][]string {
 	form := map[string][]string{}
 	c.QueryArgs().VisitAll(func(key, value []byte) {
-		k := b2s(key)
+		k := formKeyRepl.Replace(b2s(key))
 		form[k] = append(form[k], b2s(value))
 	})
 	c.PostArgs().VisitAll(func(key, value []byte) {
-		k := b2s(key)
+		k := formKeyRepl.Replace(b2s(key))
 		form[k] = append(form[k], b2s(value))
 	})
 	mf, err := c.MultipartForm()
