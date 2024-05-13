@@ -546,7 +546,7 @@ type Cookiex struct {
 
 // Cookie sets a cookie by passing a cookie struct.
 // Use like c.Cookie(&Cookiex{Name: "...", Value: "..."})
-func (c *Ctx) Cookie(cookie *Cookiex) {
+func (c *Ctx) Cookie(cookie *Cookiex, secureCheck ...bool) {
 	fcookie := AcquireCookie()
 	fcookie.SetKey(cookie.Name)
 	fcookie.SetValue(cookie.Value)
@@ -558,6 +558,9 @@ func (c *Ctx) Cookie(cookie *Cookiex) {
 	if !cookie.SessionOnly {
 		fcookie.SetMaxAge(cookie.MaxAge)
 		fcookie.SetExpire(cookie.Expires)
+	}
+	if cookie.Secure && len(secureCheck) > 0 && secureCheck[0] && !c.Secure() {
+		cookie.Secure = false
 	}
 	fcookie.SetSecure(cookie.Secure)
 	fcookie.SetHTTPOnly(cookie.HTTPOnly)
@@ -979,15 +982,21 @@ func (c *Ctx) ParamsInt(key string, defaultValue ...int) (int, error) {
 	return value, nil
 }
 
+const schemeKey = "_scheme_"
+
 // Scheme contains the request protocol string: http or https for TLS requests.
 // Please use Config.EnableTrustedProxyCheck to prevent header spoofing, in case when your app is behind the proxy.
 func (c *Ctx) Scheme() string {
+	if s, ok := c.UserValue(schemeKey).(string); ok && s != "" {
+		return s
+	}
 	p := c.Get("X-Forwarded-Proto")
 	if len(p) == 0 {
 		if p = c.Get("X-Forwarded-Protocol"); len(p) == 0 {
 			p = b2s(c.Request.URI().Scheme())
 		}
 	}
+	c.SetUserValue(schemeKey, p)
 	return p
 }
 
