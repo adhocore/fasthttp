@@ -165,7 +165,7 @@ func bufApp(buf *[]byte, s string, w int, c byte) {
 // Handle is a function that can be registered to a route to handle HTTP
 // requests. Like HandlerFunc, but has a third parameter for the values of
 // wildcards (path variables).
-type Handle func(*Ctx) error
+type Handle func(*Ctx) (err error)
 
 // Param is a single URL parameter, consisting of a key and a value.
 type Param struct {
