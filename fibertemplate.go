@@ -16,6 +16,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/valyala/bytebufferpool"
 )
 
 const LayoutEmbed = "embed"
@@ -29,6 +31,9 @@ type Render struct {
 	Extension  string
 	Reload, ok bool
 }
+
+// ViewHandler is custom view renderer
+type ViewHandler func(c *Ctx, buf []byte) error
 
 var ErrEmbedCalled = errors.New("embed called directly")
 
@@ -110,6 +115,14 @@ func (r *Render) Load() *Render {
 	}
 	r.ok = true
 	return r
+}
+
+func (r *Render) RenderBytes(name string, binding Map, layout ...string) ([]byte, error) {
+	out := bytebufferpool.Get()
+	defer bytebufferpool.Put(out)
+
+	err := r.Render(out, name, binding, layout...)
+	return out.Bytes(), err
 }
 
 func (r *Render) Render(out io.Writer, name string, binding Map, layouts ...string) (err error) {

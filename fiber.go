@@ -192,8 +192,11 @@ func (app *App) GetPost(path string, handle Handle) *Router {
 	return app.Get(path, handle).Post(path, handle)
 }
 
-const routeNamesKey = "_route_names_"
-const viewRendererKey = "_view_renderer_"
+const (
+	routeNamesKey   = "_route_names_"
+	viewRendererKey = "_view_renderer_"
+	ViewHandlerKey  = "_view_handler_"
+)
 
 // ReqStartTimeKey is request start time key
 const ReqStartTimeKey = "_req_start_time_"
@@ -301,8 +304,8 @@ func (r *Group) Use(handle Handle) {
 
 // Error represents an error that occurred while handling a request.
 type Error struct {
-	Code    int    `json:"code"`
 	Message string `json:"message"`
+	Code    int    `json:"code"`
 }
 
 // Error makes it compatible with the `error` interface.
@@ -1289,6 +1292,10 @@ func (c *Ctx) Render(name string, bind Map, layouts ...string) error {
 	bind = c.mergeBind(bind)
 	if err := view.Render(buf, name, bind, layouts...); err != nil {
 		return fmt.Errorf("render view: %w", err)
+	}
+
+	if viewHandler, ok := c.UserValue(ViewHandlerKey).(ViewHandler); ok && viewHandler != nil {
+		return viewHandler(c, buf.Bytes())
 	}
 
 	c.Response.Header.SetContentType(MIMETextHTMLCharsetUTF8)
