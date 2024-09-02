@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -476,6 +477,9 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	}
 
 	host := uri.Host()
+	if bytes.ContainsRune(host, ',') {
+		return fmt.Errorf("invalid host %q. Use HostClient for multiple hosts", host)
+	}
 
 	isTLS := false
 	if uri.isHTTPS() {
@@ -1355,9 +1359,7 @@ func (c *HostClient) do(req *Request, resp *Response) (bool, error) {
 		defer ReleaseResponse(resp)
 	}
 
-	ok, err := c.doNonNilReqResp(req, resp)
-
-	return ok, err
+	return c.doNonNilReqResp(req, resp)
 }
 
 func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error) {
@@ -1739,7 +1741,17 @@ func (c *HostClient) releaseConn(cc *clientConn) {
 			w := q.popFront()
 			if w.waiting() {
 				delivered = w.tryDeliver(cc, nil)
-				break
+				// This is the last resort to hand over conCount sema.
+				// We must ensure that there are no valid waiters in connsWait
+				// when we exit this loop.
+				//
+				// We did not apply the same looping pattern in the decConnsCount
+				// method because it needs to create a new time-spent connection,
+				// and the decConnsCount call chain will inevitably reach this point.
+				// When MaxConnWaitTimeout>0.
+				if delivered {
+					break
+				}
 			}
 		}
 	}

@@ -1760,7 +1760,7 @@ func (s *Server) GetWorkersCount() (ct int) {
 		return
 	}
 	for _, wp := range s.wp {
-		ct += wp.workersCount
+		ct += int(wp.workersCount)
 	}
 	return
 }
@@ -1917,8 +1917,8 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 					reqConf := onHdrRecv(&ctx.Request.Header)
 					if reqConf.ReadTimeout > 0 {
 						deadline := time.Now().Add(reqConf.ReadTimeout)
-						if err := c.SetReadDeadline(deadline); err != nil {
-							panic(fmt.Sprintf("BUG: error in SetReadDeadline(%v): %v", deadline, err))
+						if err = c.SetReadDeadline(deadline); err != nil {
+							break
 						}
 					}
 					switch {
@@ -2057,14 +2057,14 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		ctx.hijackNoResponse = false
 
 		if writeTimeout > 0 {
-			if err := c.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
-				panic(fmt.Sprintf("BUG: error in SetWriteDeadline(%v): %v", writeTimeout, err))
+			if err = c.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+				break
 			}
 			previousWriteTimeout = writeTimeout
 		} else if previousWriteTimeout > 0 {
 			// We don't want a write timeout but we previously set one, remove it.
-			if err := c.SetWriteDeadline(zeroTime); err != nil {
-				panic(fmt.Sprintf("BUG: error in SetWriteDeadline(zeroTime): %v", err))
+			if err = c.SetWriteDeadline(zeroTime); err != nil {
+				break
 			}
 			previousWriteTimeout = 0
 		}
@@ -2401,7 +2401,14 @@ func (ctx *RequestCtx) Deadline() (deadline time.Time, ok bool) {
 // Note: Because creating a new channel for every request is just too expensive, so
 // RequestCtx.s.done is only closed when the server is shutting down.
 func (ctx *RequestCtx) Done() <-chan struct{} {
-	return ctx.s.done
+	// fix use new variables to prevent panic caused by modifying the original done chan to nil.
+	done := ctx.s.done
+	if done == nil {
+		done = make(chan struct{}, 1)
+		done <- struct{}{}
+		return done
+	}
+	return done
 }
 
 // Err returns a non-nil error value after Done is closed,
@@ -2415,7 +2422,7 @@ func (ctx *RequestCtx) Done() <-chan struct{} {
 // RequestCtx.s.done is only closed when the server is shutting down.
 func (ctx *RequestCtx) Err() error {
 	select {
-	case <-ctx.s.done:
+	case <-ctx.Done():
 		return context.Canceled
 	default:
 		return nil
