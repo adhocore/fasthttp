@@ -42,28 +42,30 @@ type Logger interface {
 // WARNING: using prefork prevents the use of any global state!
 // Things like in-memory caches won't work.
 type Prefork struct {
+
+	// By default standard logger from log package is used.
+	Logger Logger
+
+	ln net.Listener
+
+	ServeFunc func(ln net.Listener) error
+
 	// The network must be "tcp", "tcp4" or "tcp6".
 	//
 	// By default is "tcp4"
 	Network string
+
+	files []*os.File
+
+	// Child prefork processes may exit with failure and will be started over until the times reach
+	// the value of RecoverThreshold, then it will return and terminate the server.
+	RecoverThreshold int
 
 	// Flag to use a listener with reuseport, if not a file Listener will be used
 	// See: https://www.nginx.com/blog/socket-sharding-nginx-release-1-9-1/
 	//
 	// It's disabled by default
 	Reuseport bool
-
-	// Child prefork processes may exit with failure and will be started over until the times reach
-	// the value of RecoverThreshold, then it will return and terminate the server.
-	RecoverThreshold int
-
-	// By default standard logger from log package is used.
-	Logger Logger
-
-	ServeFunc func(ln net.Listener) error
-
-	ln    net.Listener
-	files []*os.File
 }
 
 // IsChild checks if the current thread/process is a child.
@@ -165,8 +167,8 @@ func (p *Prefork) prefork(addr string) (err error) {
 	}
 
 	type procSig struct {
-		pid int
 		err error
+		pid int
 	}
 
 	goMaxProcs := runtime.GOMAXPROCS(0)
@@ -188,7 +190,7 @@ func (p *Prefork) prefork(addr string) (err error) {
 
 		childProcs[cmd.Process.Pid] = cmd
 		go func() {
-			sigCh <- procSig{cmd.Process.Pid, cmd.Wait()}
+			sigCh <- procSig{cmd.Wait(), cmd.Process.Pid}
 		}()
 	}
 
@@ -214,7 +216,7 @@ func (p *Prefork) prefork(addr string) (err error) {
 		}
 		childProcs[cmd.Process.Pid] = cmd
 		go func() {
-			sigCh <- procSig{cmd.Process.Pid, cmd.Wait()}
+			sigCh <- procSig{cmd.Wait(), cmd.Process.Pid}
 		}()
 	}
 

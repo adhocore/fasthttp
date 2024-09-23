@@ -208,10 +208,22 @@ const MatchedRoutePathKey = "_matched_route_path_"
 // Router is a Handler which can be used to dispatch requests to different
 // handler functions via configurable routes
 type Router struct {
-	trees map[string]*node
-
 	paramsPool sync.Pool
-	maxParams  uint16
+	trees      map[string]*node
+
+	// Function to handle panics recovered from http handlers.
+	// It should be used to generate a error page and return the http error code
+	// 500 (Internal Server Error).
+	// The handler can be used to keep your server from crashing because of
+	// unrecovered panics.
+	PanicHandler ErrorHandler
+
+	names  map[string]string // name => registered path
+	static map[string]Handle // static handlers
+
+	// New
+	last      string // last registered path
+	maxParams uint16
 
 	// Enables automatic redirection if the current route can't be matched but a
 	// handler for the path with (without) the trailing slash exists.
@@ -230,18 +242,6 @@ type Router struct {
 	// For example /FOO and /..//Foo could be redirected to /foo.
 	// RedirectTrailingSlash is independent of this option.
 	RedirectFixedPath bool
-
-	// Function to handle panics recovered from http handlers.
-	// It should be used to generate a error page and return the http error code
-	// 500 (Internal Server Error).
-	// The handler can be used to keep your server from crashing because of
-	// unrecovered panics.
-	PanicHandler ErrorHandler
-
-	// New
-	last   string            // last registered path
-	names  map[string]string // name => registered path
-	static map[string]Handle // static handlers
 }
 
 // NewRouter returns a new initialized Router.
@@ -529,13 +529,13 @@ const (
 )
 
 type node struct {
+	handle    Handle
 	path      string
 	indices   string
+	children  []*node
+	priority  uint32
 	wildChild bool
 	nType     nodeType
-	priority  uint32
-	children  []*node
-	handle    Handle
 }
 
 // Increments priority of the given child and reorders if necessary

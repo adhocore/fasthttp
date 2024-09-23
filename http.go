@@ -38,21 +38,28 @@ func SetBodySizePoolLimit(reqBodyLimit, respBodyLimit int) {
 type Request struct {
 	noCopy noCopy
 
+	bodyStream io.Reader
+	w          requestBodyWriter
+	body       *bytebufferpool.ByteBuffer
+
+	multipartForm         *multipart.Form
+	multipartFormBoundary string
+
+	postArgs Args
+
+	bodyRaw []byte
+
+	uri URI
+
 	// Request header.
 	//
 	// Copying Header by value is forbidden. Use pointer to Header instead.
 	Header RequestHeader
 
-	uri      URI
-	postArgs Args
+	// Request timeout. Usually set by DoDeadline or DoTimeout
+	// if <= 0, means not set
+	timeout time.Duration
 
-	bodyStream io.Reader
-	w          requestBodyWriter
-	body       *bytebufferpool.ByteBuffer
-	bodyRaw    []byte
-
-	multipartForm         *multipart.Form
-	multipartFormBoundary string
 	secureErrorLogMessage bool
 
 	// Group bool members in order to reduce Request object size.
@@ -64,10 +71,6 @@ type Request struct {
 	// Used by Server to indicate the request was received on a HTTPS endpoint.
 	// Client/HostClient shouldn't use this field but should depend on the uri.scheme instead.
 	isTLS bool
-
-	// Request timeout. Usually set by DoDeadline or DoTimeout
-	// if <= 0, means not set
-	timeout time.Duration
 
 	// Use Host header (request.Header.SetHost) instead of the host from SetRequestURI, SetHost, or URI().SetHost
 	UseHostHeader bool
@@ -88,6 +91,17 @@ type Request struct {
 type Response struct {
 	noCopy noCopy
 
+	bodyStream io.Reader
+
+	// Remote TCPAddr from concurrently net.Conn.
+	raddr net.Addr
+	// Local TCPAddr from concurrently net.Conn.
+	laddr net.Addr
+	w     responseBodyWriter
+	body  *bytebufferpool.ByteBuffer
+
+	bodyRaw []byte
+
 	// Response header.
 	//
 	// Copying Header by value is forbidden. Use pointer to Header instead.
@@ -101,11 +115,6 @@ type Response struct {
 	// Use SetBodyStream to set the body stream.
 	StreamBody bool
 
-	bodyStream io.Reader
-	w          responseBodyWriter
-	body       *bytebufferpool.ByteBuffer
-	bodyRaw    []byte
-
 	// Response.Read() skips reading body if set to true.
 	// Use it for reading HEAD responses.
 	//
@@ -115,11 +124,6 @@ type Response struct {
 
 	keepBodyBuffer        bool
 	secureErrorLogMessage bool
-
-	// Remote TCPAddr from concurrently net.Conn.
-	raddr net.Addr
-	// Local TCPAddr from concurrently net.Conn.
-	laddr net.Addr
 }
 
 // SetHost sets host for the request.

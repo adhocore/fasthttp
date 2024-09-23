@@ -14,11 +14,11 @@ var ErrInmemoryListenerClosed = errors.New("InmemoryListener is already closed: 
 // It may be used either for fast in-process client<->server communications
 // without network stack overhead or for client<->server tests.
 type InmemoryListener struct {
+	listenerAddr net.Addr
+	conns        chan acceptConn
+	addrLock     sync.RWMutex
 	lock         sync.Mutex
 	closed       bool
-	conns        chan acceptConn
-	listenerAddr net.Addr
-	addrLock     sync.RWMutex
 }
 
 type acceptConn struct {

@@ -26,9 +26,9 @@ type Render struct {
 	fs         http.FileSystem
 	t          *template.Template
 	fns        template.FuncMap
-	mu         sync.RWMutex
 	Directory  string
 	Extension  string
+	mu         sync.RWMutex
 	Reload, ok bool
 }
 

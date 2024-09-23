@@ -7,8 +7,8 @@ import (
 
 type perIPConnCounter struct {
 	pool sync.Pool
-	lock sync.Mutex
 	m    map[uint32]int
+	lock sync.Mutex
 }
 
 func (cc *perIPConnCounter) Register(ip uint32) int {
@@ -39,8 +39,9 @@ func (cc *perIPConnCounter) Unregister(ip uint32) {
 type perIPConn struct {
 	net.Conn
 
-	ip               uint32
 	perIPConnCounter *perIPConnCounter
+
+	ip uint32
 }
 
 func acquirePerIPConn(conn net.Conn, ip uint32, counter *perIPConnCounter) *perIPConn {
