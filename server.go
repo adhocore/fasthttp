@@ -1693,8 +1693,8 @@ func (s *Server) ServeConn(c net.Conn) error {
 		c = pic
 	}
 
-	n := atomic.AddUint32(&s.concurrency, 1)
-	if n > uint32(s.getConcurrency()) {
+	n := int(atomic.AddUint32(&s.concurrency, 1))
+	if n > s.getConcurrency() {
 		atomic.AddUint32(&s.concurrency, ^uint32(0))
 		s.writeFastError(c, StatusServiceUnavailable, "The connection cannot be served because Server.Concurrency limit exceeded")
 		c.Close()
@@ -2624,7 +2624,7 @@ const (
 	StateClosed
 )
 
-var stateName = map[ConnState]string{
+var stateName = []string{
 	StateNew:      "new",
 	StateActive:   "active",
 	StateIdle:     "idle",
