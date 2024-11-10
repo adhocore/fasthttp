@@ -1062,6 +1062,18 @@ func (c *Ctx) QueryInt(key string, defaultValue ...int) int {
 	return value
 }
 
+func (c *Ctx) QueryInt64(key string, defaultValue ...int64) int64 {
+	value, err := strconv.ParseInt(b2s(c.QueryArgs().Peek(key)), 10, 64)
+	if err != nil {
+		if len(defaultValue) > 0 {
+			return defaultValue[0]
+		}
+		return 0
+	}
+
+	return value
+}
+
 // QueryBool returns bool value of key string parameter in the url.
 // Default to empty or invalid key is false.
 //
