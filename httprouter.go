@@ -217,6 +217,7 @@ type Router struct {
 	// The handler can be used to keep your server from crashing because of
 	// unrecovered panics.
 	PanicHandler ErrorHandler
+	NotFound     Handle
 
 	names  map[string]string // name => registered path
 	static map[string]Handle // static handlers
@@ -463,6 +464,10 @@ func (r *Router) Serve(c *Ctx, middleware func(string, Handle, *Ctx) error) (err
 	}
 
 	// Handle 404
+	if r.NotFound != nil {
+		return r.NotFound(c)
+	}
+
 	c.NotFound()
 	return
 }
