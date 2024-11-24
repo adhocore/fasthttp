@@ -1408,6 +1408,12 @@ func (c *Ctx) Set(key, val string) *Ctx {
 	return c
 }
 
+// Add appends HTTP header field specified by key
+func (c *Ctx) Add(key, val string) *Ctx {
+	c.Response.Header.Add(key, val)
+	return c
+}
+
 // SetUserValues sets many user values using Map
 func (c *Ctx) SetUserValues(vals Map) {
 	for k, v := range vals {
