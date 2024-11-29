@@ -193,6 +193,7 @@ func (app *App) GetPost(path string, handle Handle) *Router {
 }
 
 const (
+	routerKey       = "_router_"
 	routeNamesKey   = "_route_names_"
 	viewRendererKey = "_view_renderer_"
 	ViewHandlerKey  = "_view_handler_"
@@ -205,6 +206,7 @@ const ReqStartTimeKey = "_req_start_time_"
 func (app *App) Handler(c *Ctx) {
 	c.SetUserValues(Map{
 		ReqStartTimeKey:  time.Now(),
+		routerKey:        app.Router,
 		viewRendererKey:  app.View,
 		routeNamesKey:    app.Router.names,
 		requestServedKey: false,
@@ -1223,6 +1225,10 @@ func (c *Ctx) Range(size int) (Range, error) {
 	return rangeData, nil
 }
 
+func (c *Ctx) Router() *Router {
+	return c.UserValue(routerKey).(*Router)
+}
+
 const bindViewMapKey = "_bind_view_map_"
 
 // Bind Add vars to default view var map binding to template engine.
@@ -1245,6 +1251,9 @@ func (c *Ctx) mergeBind(vars Map) Map {
 // Bound gets val bound to view by key
 func (c *Ctx) Bound(key string) any {
 	if old, ok := c.UserValue(bindViewMapKey).(Map); ok {
+		if key == "" {
+			return old
+		}
 		return old[key]
 	}
 	return nil
