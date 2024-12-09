@@ -26,6 +26,7 @@ type Render struct {
 	fs         http.FileSystem
 	t          *template.Template
 	fns        template.FuncMap
+	Err        error
 	Directory  string
 	Extension  string
 	mu         sync.RWMutex
@@ -109,11 +110,13 @@ func (r *Render) Load() *Render {
 	}
 
 	if r.fs != nil {
-		walker(r.fs, r.Directory, walkFn)
+		r.Err = walker(r.fs, r.Directory, walkFn)
 	} else {
-		filepath.Walk(r.Directory, walkFn)
+		r.Err = filepath.Walk(r.Directory, walkFn)
 	}
-	r.ok = true
+	if r.ok = r.Err == nil; !r.ok {
+		fmt.Println(r.Err) // better than panic?
+	}
 	return r
 }
 
