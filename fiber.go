@@ -47,6 +47,17 @@ const (
 )
 
 const (
+	RouteParamKey    = "_route_param_"
+	BindViewMapKey   = "_bind_view_map_"
+	RouterKey        = "_router_"
+	RouteNamesKey    = "_route_names_"
+	ViewRendererKey  = "_view_renderer_"
+	ViewHandlerKey   = "_view_handler_"
+	RequestServedKey = "_request_served_"
+	ReqStartTimeKey  = "_req_start_time_" // ReqStartTimeKey is request start time key
+)
+
+const (
 	MIMETextXML         = "text/xml"
 	MIMETextHTML        = "text/html"
 	MIMETextPlain       = "text/plain"
@@ -192,24 +203,14 @@ func (app *App) GetPost(path string, handle Handle) *Router {
 	return app.Get(path, handle).Post(path, handle)
 }
 
-const (
-	routerKey       = "_router_"
-	routeNamesKey   = "_route_names_"
-	viewRendererKey = "_view_renderer_"
-	ViewHandlerKey  = "_view_handler_"
-)
-
-// ReqStartTimeKey is request start time key
-const ReqStartTimeKey = "_req_start_time_"
-
 // Handler is the entry point of all request handlers
 func (app *App) Handler(c *Ctx) {
 	c.SetUserValues(Map{
 		ReqStartTimeKey:  time.Now(),
-		routerKey:        app.Router,
-		viewRendererKey:  app.View,
-		routeNamesKey:    app.Router.names,
-		requestServedKey: false,
+		RouterKey:        app.Router,
+		ViewRendererKey:  app.View,
+		RouteNamesKey:    app.Router.names,
+		RequestServedKey: false,
 	})
 	if err := app.Router.Serve(c, app.pipeThru); err != nil {
 		if app.ErrorHandler != nil {
@@ -877,17 +878,15 @@ func (c *Ctx) ClientHelloInfo() *tls.ClientHelloInfo {
 	return nil
 }
 
-const requestServedKey = "_request_served_"
-
 // Finish marks request as finished to be used by pre middlewares
 func (c *Ctx) Finish() error {
-	c.SetUserValue(requestServedKey, true)
+	c.SetUserValue(RequestServedKey, true)
 	return nil
 }
 
 // Served tells is request is served already
 func (c *Ctx) Served() bool {
-	v, ok := c.UserValue(requestServedKey).(bool)
+	v, ok := c.UserValue(RequestServedKey).(bool)
 	return v && ok
 }
 
@@ -946,7 +945,7 @@ func (c *Ctx) FormValues(key string, defaultValue ...string) string {
 // Returned value is only valid within the handler. Do not store any references.
 // Make copies or use the Immutable setting to use the value outside the Handler.
 func (c *Ctx) Params(key string, defaultValue ...string) (v string) {
-	if ps, ok := c.UserValue(routeParamKey).(*Params); ok && ps != nil {
+	if ps, ok := c.UserValue(RouteParamKey).(*Params); ok && ps != nil {
 		v = ps.ByName(key)
 	}
 	return defaultString(v, defaultValue)
@@ -956,8 +955,8 @@ func (c *Ctx) Params(key string, defaultValue ...string) (v string) {
 // Using Params method to get params.
 func (c *Ctx) AllParams() map[string]string {
 	m := map[string]string{}
-	if ps, ok := c.UserValue(routeParamKey).(Params); ok && ps != nil {
-		for _, p := range ps {
+	if ps, ok := c.UserValue(RouteParamKey).(*Params); ok && ps != nil {
+		for _, p := range *ps {
 			m[p.Key] = p.Value
 		}
 	}
@@ -1226,20 +1225,18 @@ func (c *Ctx) Range(size int) (Range, error) {
 }
 
 func (c *Ctx) Router() *Router {
-	return c.UserValue(routerKey).(*Router)
+	return c.UserValue(RouterKey).(*Router)
 }
-
-const bindViewMapKey = "_bind_view_map_"
 
 // Bind Add vars to default view var map binding to template engine.
 // Variables are read by the Render method and may be overwritten.
 func (c *Ctx) Bind(vars Map) error {
-	c.SetUserValue(bindViewMapKey, c.mergeBind(vars))
+	c.SetUserValue(BindViewMapKey, c.mergeBind(vars))
 	return nil
 }
 
 func (c *Ctx) mergeBind(vars Map) Map {
-	if old, ok := c.UserValue(bindViewMapKey).(Map); ok {
+	if old, ok := c.UserValue(BindViewMapKey).(Map); ok {
 		for k, v := range vars {
 			old[k] = v
 		}
@@ -1250,7 +1247,7 @@ func (c *Ctx) mergeBind(vars Map) Map {
 
 // Bound gets val bound to view by key
 func (c *Ctx) Bound(key string) any {
-	if old, ok := c.UserValue(bindViewMapKey).(Map); ok {
+	if old, ok := c.UserValue(BindViewMapKey).(Map); ok {
 		if key == "" {
 			return old
 		}
@@ -1262,7 +1259,7 @@ func (c *Ctx) Bound(key string) any {
 // GetRouteURL generates URLs to named routes, with parameters. URLs are relative, for example: "/user/1831"
 func (c *Ctx) GetRouteURL(routeName string, params Map) (string, error) {
 	q := "queries"
-	if names, ok := c.UserValue(routeNamesKey).(StrMap); ok && names[routeName] != "" {
+	if names, ok := c.UserValue(RouteNamesKey).(StrMap); ok && names[routeName] != "" {
 		uri := names[routeName]
 		for k, v := range params {
 			if k != q {
@@ -1309,7 +1306,7 @@ var ErrNoViewRenderer = errors.New("view renderer not configured")
 // Render a template with data and sends a text/html response.
 // We support the following engines: html, amber, handlebars, mustache, pug
 func (c *Ctx) Render(name string, bind Map, layouts ...string) error {
-	view, ok := c.UserValue(viewRendererKey).(*Render)
+	view, ok := c.UserValue(ViewRendererKey).(*Render)
 	if !ok || view == nil {
 		return ErrNoViewRenderer
 	}
@@ -1336,7 +1333,7 @@ func (c *Ctx) Render(name string, bind Map, layouts ...string) error {
 func (c *Ctx) Route() string {
 	path, ok := c.UserValue(MatchedRoutePathKey).(string)
 	if ok {
-		if namePaths, ok := c.UserValue(routeNamesKey).(StrMap); ok {
+		if namePaths, ok := c.UserValue(RouteNamesKey).(StrMap); ok {
 			for name, pathx := range namePaths {
 				if pathx == path {
 					return name

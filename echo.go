@@ -29,8 +29,8 @@ var DefaultBinder = &binder{}
 // BindPathParams binds path params to bindable object
 func (b *binder) BindPathParams(c *Ctx, i any) error {
 	params := map[string][]string{}
-	if ps, ok := c.UserValue(routeParamKey).(Params); ok && ps != nil {
-		for _, p := range ps {
+	if ps, ok := c.UserValue(RouteParamKey).(*Params); ok && ps != nil {
+		for _, p := range *ps {
 			params[p.Key] = []string{p.Value}
 		}
 	}

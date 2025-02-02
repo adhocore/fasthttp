@@ -10,7 +10,6 @@
 package fasthttp
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -189,16 +188,14 @@ func (ps Params) ByName(name string) string {
 	return ""
 }
 
-type paramsKey struct{}
-
-// ParamsKey is the request context key under which URL params are stored.
-var ParamsKey = paramsKey{}
-
-// ParamsFromContext pulls the URL parameters from a request context,
-// or returns nil if none are present.
-func ParamsFromContext(ctx context.Context) Params {
-	p, _ := ctx.Value(ParamsKey).(Params)
-	return p
+func (ps Params) Set(name, value string) {
+	for i, p := range ps {
+		if p.Key == name {
+			ps[i].Value = value
+			return
+		}
+	}
+	ps = append(ps, Param{Key: name, Value: value})
 }
 
 // MatchedRoutePathKey is the Param name under which the path of the matched
@@ -376,8 +373,6 @@ func (r *Router) Name(name string) {
 	r.names[name] = r.last
 }
 
-const routeParamKey = "_route_param_"
-
 func (r *Router) recv(c *Ctx) {
 	if rcv := recover(); rcv != nil {
 		err, ok := rcv.(error)
@@ -431,7 +426,7 @@ func (r *Router) Serve(c *Ctx, middleware func(string, Handle, *Ctx) error) (err
 	}
 
 	if handle, rpath, ps, tsr := root.getValue(path, r.getParams); handle != nil {
-		c.SetUserValues(Map{MatchedRoutePathKey: rpath, routeParamKey: ps})
+		c.SetUserValues(Map{MatchedRoutePathKey: rpath, RouteParamKey: ps})
 		defer r.putParams(ps)
 		return middleware(path, handle, c)
 	} else if method != MethodConnect && path != "/" {
