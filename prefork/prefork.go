@@ -190,7 +190,7 @@ func (p *Prefork) prefork(addr string) (err error) {
 
 		childProcs[cmd.Process.Pid] = cmd
 		go func() {
-			sigCh <- procSig{cmd.Wait(), cmd.Process.Pid}
+			sigCh <- procSig{pid: cmd.Process.Pid, err: cmd.Wait()}
 		}()
 	}
 
@@ -216,7 +216,7 @@ func (p *Prefork) prefork(addr string) (err error) {
 		}
 		childProcs[cmd.Process.Pid] = cmd
 		go func() {
-			sigCh <- procSig{cmd.Wait(), cmd.Process.Pid}
+			sigCh <- procSig{pid: cmd.Process.Pid, err: cmd.Wait()}
 		}()
 	}
 

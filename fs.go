@@ -1050,9 +1050,13 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		}
 	}
 
-	pathStr := string(path)
+	originalPathStr := string(path)
+	pathStr := originalPathStr
+	if hasTrailingSlash {
+		pathStr = originalPathStr[:len(originalPathStr)-1]
+	}
 
-	ff, ok := h.cacheManager.GetFileFromCache(fileCacheKind, pathStr)
+	ff, ok := h.cacheManager.GetFileFromCache(fileCacheKind, originalPathStr)
 	if !ok {
 		filePath := h.pathToFilePath(pathStr)
 
@@ -1221,6 +1225,9 @@ func ParseByteRange(byteRange []byte, contentLength int) (startPos, endPos int, 
 func (h *fsHandler) openIndexFile(ctx *RequestCtx, dirPath string, mustCompress bool, fileEncoding string) (*fsFile, error) {
 	for _, indexName := range h.indexNames {
 		indexFilePath := dirPath + "/" + indexName
+		if dirPath != "" {
+			indexFilePath = dirPath + "/" + indexName
+		}
 		ff, err := h.openFSFile(indexFilePath, mustCompress, fileEncoding)
 		if err == nil {
 			return ff, nil
@@ -1375,7 +1382,7 @@ func (h *fsHandler) compressAndOpenFSFile(filePath, fileEncoding string) (*fsFil
 	}
 
 	if compressedFilePath != filePath {
-		if err := os.MkdirAll(filepath.Dir(compressedFilePath), os.ModePerm); err != nil {
+		if err := os.MkdirAll(filepath.Dir(compressedFilePath), 0o750); err != nil {
 			return nil, err
 		}
 	}

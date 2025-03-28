@@ -117,7 +117,7 @@ func (ln *InmemoryListener) DialWithLocalAddr(local net.Addr) (net.Conn, error) 
 	ln.lock.Lock()
 	accepted := make(chan struct{})
 	if !ln.closed {
-		ln.conns <- acceptConn{sConn, accepted}
+		ln.conns <- acceptConn{conn: sConn, accepted: accepted}
 		// Wait until the connection has been accepted.
 		<-accepted
 	} else {

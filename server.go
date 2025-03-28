@@ -1561,11 +1561,7 @@ func (s *Server) ShutdownWithContext(ctx context.Context) (err error) {
 		return nil
 	}
 
-	for _, ln := range s.ln {
-		if err = ln.Close(); err != nil {
-			return err
-		}
-	}
+	lnerr := s.closeListenersLocked()
 
 	if s.done != nil {
 		close(s.done)
@@ -1576,20 +1572,21 @@ func (s *Server) ShutdownWithContext(ctx context.Context) (err error) {
 	// Now we just have to wait until all workers are done or timeout.
 	ticker := time.NewTicker(time.Millisecond * 100)
 	defer ticker.Stop()
-END:
+
 	for {
 		s.closeIdleConns()
 
 		if open := atomic.LoadInt32(&s.open); open == 0 {
-			break
+			// There may be a pending request to call ctx.Done(). Therefore, we only set it to nil when open == 0.
+			s.done = nil
+			return lnerr
 		}
 		// This is not an optimal solution but using a sync.WaitGroup
 		// here causes data races as it's hard to prevent Add() to be called
 		// while Wait() is waiting.
 		select {
 		case <-ctx.Done():
-			err = ctx.Err()
-			break END
+			return ctx.Err()
 		case <-ticker.C:
 			continue
 		}
@@ -1713,10 +1710,10 @@ func (s *Server) ServeConn(c net.Conn) error {
 	atomic.AddUint32(&s.concurrency, ^uint32(0))
 
 	if err != errHijacked {
-		err1 := c.Close()
+		errc := c.Close()
 		s.setState(c, StateClosed)
 		if err == nil {
-			err = err1
+			err = errc
 		}
 	} else {
 		err = nil
@@ -2588,6 +2585,17 @@ func (s *Server) closeIdleConns() {
 		}
 	}
 	s.idleConnsMu.Unlock()
+}
+
+func (s *Server) closeListenersLocked() error {
+	var err error
+	for _, ln := range s.ln {
+		if cerr := ln.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}
+	s.ln = nil
+	return err
 }
 
 // A ConnState represents the state of a client connection to a server.

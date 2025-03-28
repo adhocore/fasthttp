@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"strconv"
 	"sync"
@@ -60,6 +61,37 @@ func Dial(addr string) (net.Conn, error) {
 //   - aaa.com:8080
 func DialTimeout(addr string, timeout time.Duration) (net.Conn, error) {
 	return defaultDialer.DialTimeout(addr, timeout)
+}
+
+// ErrDialWithUpstream wraps dial error with upstream info.
+//
+// Should use errors.As to get upstream information from error:
+//
+//	hc := fasthttp.HostClient{Addr: "foo.com,bar.com"}
+//	err := hc.Do(req, res)
+//
+//	var dialErr *fasthttp.ErrDialWithUpstream
+//	if errors.As(err, &dialErr) {
+//		upstream = dialErr.Upstream // 34.206.39.153:80
+//	}
+type ErrDialWithUpstream struct {
+	wrapErr  error
+	Upstream string
+}
+
+func (e *ErrDialWithUpstream) Error() string {
+	return fmt.Sprintf("error when dialing %s: %s", e.Upstream, e.wrapErr.Error())
+}
+
+func (e *ErrDialWithUpstream) Unwrap() error {
+	return e.wrapErr
+}
+
+func wrapDialWithUpstream(err error, upstream string) error {
+	return &ErrDialWithUpstream{
+		Upstream: upstream,
+		wrapErr:  err,
+	}
 }
 
 // DialDualStack dials the given TCP addr using both tcp4 and tcp6.
@@ -304,7 +336,7 @@ func (d *TCPDialer) dial(addr string, dualStack bool, timeout time.Duration) (ne
 		if err == nil {
 			return conn, nil
 		}
-		if err == ErrDialTimeout {
+		if errors.Is(err, ErrDialTimeout) {
 			return nil, err
 		}
 		idx++
@@ -318,7 +350,7 @@ func (d *TCPDialer) tryDial(
 ) (net.Conn, error) {
 	timeout := time.Until(deadline)
 	if timeout <= 0 {
-		return nil, ErrDialTimeout
+		return nil, wrapDialWithUpstream(ErrDialTimeout, addr)
 	}
 
 	if concurrencyCh != nil {
@@ -334,7 +366,7 @@ func (d *TCPDialer) tryDial(
 			}
 			ReleaseTimer(tc)
 			if isTimeout {
-				return nil, ErrDialTimeout
+				return nil, wrapDialWithUpstream(ErrDialTimeout, addr)
 			}
 		}
 		defer func() { <-concurrencyCh }()
@@ -348,10 +380,13 @@ func (d *TCPDialer) tryDial(
 	ctx, cancelCtx := context.WithDeadline(context.Background(), deadline)
 	defer cancelCtx()
 	conn, err := dialer.DialContext(ctx, network, addr)
-	if err != nil && ctx.Err() == context.DeadlineExceeded {
-		return nil, ErrDialTimeout
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, wrapDialWithUpstream(ErrDialTimeout, addr)
+		}
+		return nil, wrapDialWithUpstream(err, addr)
 	}
-	return conn, err
+	return conn, nil
 }
 
 // ErrDialTimeout is returned when TCP dialing is timed out.

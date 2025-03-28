@@ -126,6 +126,7 @@ func AppendUint(dst []byte, n int) []byte {
 		// developer sanity-check
 		panic("BUG: int must be positive")
 	}
+
 	return strconv.AppendUint(dst, uint64(n), 10)
 }
 

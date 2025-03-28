@@ -8,7 +8,7 @@ Fast HTTP implementation for Go.
 
 ### adhocore/fasthttp
 
-This is a forked adaptation from v1.52.0 (+20 commits in `master`) of original **valyala/fasthttp**.
+This is a forked adaptation from v1.52.0 (+20 commits in `master`) of original **valyala/fasthttp**. Compare [them](https://github.com/adhocore/fasthttp/compare/main..valyala%3Afasthttp%3Amaster).
 
 Changes include:
 - removal of TLS support in lieu of SSL termination
@@ -17,6 +17,7 @@ Changes include:
 - addition of [julienschmidt/httprouter](https://github.com/julienschmidt/httprouter) like router mux, see [httprouter.go](./httprouter.go)
 - addition of [gofiber/fiber](https://github.com/gofiber/fiber) like app/context, see [fiber.go](./fiber.go)
 - addition of [labstack/echo](https://github.com/labstack/echo) like request binder, see [echo.go](./echo.go)
+- unreverted version of [#1846](https://github.com/valyala/fasthttp/pull/1846)
 
 ---
 
